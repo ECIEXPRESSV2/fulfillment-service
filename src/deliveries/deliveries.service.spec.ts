@@ -3,6 +3,7 @@ import { CodesService } from '../codes/domain/codes.service';
 import { ValidationError } from '../codes/domain/pickup-code.types';
 import { CodesRepository } from '../codes/infra/codes.repository';
 import { OrderProjectionService } from '../events/projections/order-projection.service';
+import { StoreStaffProjectionService } from '../events/projections/store-staff-projection.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { DeliveriesService } from './domain/deliveries.service';
@@ -19,7 +20,7 @@ function buildCode(overrides: Partial<PickupCode> = {}): PickupCode {
     token: 'tok',
     shortCode: 'A7K9-P2MX',
     status: PickupCodeStatus.ACTIVE,
-    expiresAt: new Date(Date.now() + 3600_000),
+    expiresAt: new Date(Date.now() + 3_600_000),
     usedAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -54,21 +55,36 @@ function build() {
 
   const codesRepo = {
     findActiveByOrderId: jest.fn(),
+    findLatestByOrderId: jest.fn(),
   } as unknown as jest.Mocked<CodesRepository>;
 
   const deliveriesRepo = {
     create: jest.fn().mockResolvedValue(buildDelivery()),
     findSuccessfulByOrderId: jest.fn().mockResolvedValue(null),
+    findAllByOrderId: jest.fn().mockResolvedValue([]),
+    listByStore: jest.fn(),
   } as unknown as jest.Mocked<DeliveriesRepository>;
 
   const orderProjection = {
     getByOrderId: jest.fn(),
   } as unknown as jest.Mocked<OrderProjectionService>;
 
+  const storeStaff = {
+    isAuthorized: jest.fn().mockResolvedValue(false),
+  } as unknown as jest.Mocked<StoreStaffProjectionService>;
+
   const outbox = { enqueue: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<OutboxService>;
 
-  const service = new DeliveriesService(prisma, codesService, codesRepo, deliveriesRepo, orderProjection, outbox);
-  return { service, codesService, codesRepo, deliveriesRepo, orderProjection, outbox };
+  const service = new DeliveriesService(
+    prisma,
+    codesService,
+    codesRepo,
+    deliveriesRepo,
+    orderProjection,
+    storeStaff,
+    outbox,
+  );
+  return { service, codesService, codesRepo, deliveriesRepo, orderProjection, storeStaff, outbox };
 }
 
 describe('DeliveriesService', () => {
@@ -203,6 +219,74 @@ describe('DeliveriesService', () => {
       await expect(
         service.registerDeliveryFailure('ord-1', 'seller-1', { reason: DeliveryFailureReason.OTHER }),
       ).rejects.toMatchObject({ response: { code: 'NOTE_REQUIRED' } });
+    });
+  });
+
+  describe('getFulfillmentStatus (UC-09)', () => {
+    const projection = {
+      orderId: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'CONFIRMED', createdAt: new Date(), updatedAt: new Date(),
+    };
+
+    it('404 cuando no hay proyección ni código', async () => {
+      const { service, orderProjection, codesRepo } = build();
+      orderProjection.getByOrderId.mockResolvedValue(null);
+      codesRepo.findLatestByOrderId.mockResolvedValue(null);
+      await expect(
+        service.getFulfillmentStatus('ord-x', { userId: 'u' }),
+      ).rejects.toMatchObject({ response: { code: 'ORDER_NOT_FOUND' } });
+    });
+
+    it('el comprador dueño ve el estado (código + entrega)', async () => {
+      const { service, orderProjection, codesRepo, deliveriesRepo } = build();
+      orderProjection.getByOrderId.mockResolvedValue(projection);
+      codesRepo.findLatestByOrderId.mockResolvedValue(buildCode({ status: PickupCodeStatus.USED }));
+      deliveriesRepo.findAllByOrderId.mockResolvedValue([buildDelivery({ method: DeliveryMethod.QR })]);
+
+      const status = await service.getFulfillmentStatus('ord-1', { userId: 'buyer-1' });
+      expect(status.code?.status).toBe(PickupCodeStatus.USED);
+      expect(status.delivery?.method).toBe(DeliveryMethod.QR);
+    });
+
+    it('un staff autorizado de la tienda ve el estado', async () => {
+      const { service, orderProjection, codesRepo, storeStaff } = build();
+      orderProjection.getByOrderId.mockResolvedValue(projection);
+      codesRepo.findLatestByOrderId.mockResolvedValue(buildCode());
+      storeStaff.isAuthorized.mockResolvedValue(true);
+
+      const status = await service.getFulfillmentStatus('ord-1', { userId: 'seller-9' });
+      expect(status.orderId).toBe('ord-1');
+    });
+
+    it('403 para un usuario que no es dueño ni staff ni admin', async () => {
+      const { service, orderProjection, codesRepo, storeStaff } = build();
+      orderProjection.getByOrderId.mockResolvedValue(projection);
+      codesRepo.findLatestByOrderId.mockResolvedValue(buildCode());
+      storeStaff.isAuthorized.mockResolvedValue(false);
+
+      await expect(
+        service.getFulfillmentStatus('ord-1', { userId: 'intruso' }),
+      ).rejects.toMatchObject({ response: { code: 'FULFILLMENT_ACCESS_DENIED' } });
+    });
+  });
+
+  describe('listStoreDeliveries (UC-10)', () => {
+    it('pasa filtros normalizados al repo y devuelve el formato paginado', async () => {
+      const { service, deliveriesRepo } = build();
+      deliveriesRepo.listByStore.mockResolvedValue({ data: [buildDelivery()], total: 1 });
+
+      const result = await service.listStoreDeliveries('str-1', {
+        page: 2,
+        limit: 10,
+        order: 'ASC',
+        method: DeliveryMethod.QR,
+        from: '2026-06-01T00:00:00.000Z',
+      });
+
+      expect(deliveriesRepo.listByStore).toHaveBeenCalledWith(
+        'str-1',
+        expect.objectContaining({ page: 2, limit: 10, order: 'asc', method: DeliveryMethod.QR, from: expect.any(Date) }),
+      );
+      expect(result).toEqual({ data: expect.any(Array), total: 1, page: 2, limit: 10 });
     });
   });
 });

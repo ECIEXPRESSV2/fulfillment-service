@@ -42,4 +42,47 @@ export class DeliveriesRepository {
       orderBy: { createdAt: 'desc' },
     });
   }
+
+  /** Todas las entregas (exitosas y fallidas) de un pedido, más recientes primero (UC-09). */
+  findAllByOrderId(orderId: string): Promise<Delivery[]> {
+    return this.prisma.delivery.findMany({
+      where: { orderId },
+      orderBy: { deliveredAt: 'desc' },
+    });
+  }
+
+  /** Historial paginado de entregas de una tienda con filtros (UC-10). */
+  async listByStore(storeId: string, filters: DeliveryListFilters): Promise<{ data: Delivery[]; total: number }> {
+    const where: Prisma.DeliveryWhereInput = {
+      storeId,
+      ...(filters.method ? { method: filters.method } : {}),
+      ...(filters.confirmedByUserId ? { confirmedByUserId: filters.confirmedByUserId } : {}),
+      ...(filters.from || filters.to
+        ? { deliveredAt: { ...(filters.from ? { gte: filters.from } : {}), ...(filters.to ? { lte: filters.to } : {}) } }
+        : {}),
+    };
+
+    const [data, total] = await Promise.all([
+      this.prisma.delivery.findMany({
+        where,
+        orderBy: { deliveredAt: filters.order },
+        skip: (filters.page - 1) * filters.limit,
+        take: filters.limit,
+      }),
+      this.prisma.delivery.count({ where }),
+    ]);
+
+    return { data, total };
+  }
+}
+
+/** Filtros normalizados (fechas como Date) para `listByStore`. */
+export interface DeliveryListFilters {
+  page: number;
+  limit: number;
+  order: 'asc' | 'desc';
+  method?: DeliveryMethod | null;
+  confirmedByUserId?: string | null;
+  from?: Date | null;
+  to?: Date | null;
 }

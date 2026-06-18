@@ -9,12 +9,15 @@ import {
   Delivery,
   DeliveryFailureReason,
   DeliveryMethod,
+  PickupCodeStatus,
   Prisma,
 } from '@prisma/client';
 import { CodesService } from '../../codes/domain/codes.service';
 import { ValidationError } from '../../codes/domain/pickup-code.types';
 import { CodesRepository } from '../../codes/infra/codes.repository';
+import { CurrentUserData } from '../../common/decorators/current-user.decorator';
 import { OrderProjectionService } from '../../events/projections/order-projection.service';
+import { StoreStaffProjectionService } from '../../events/projections/store-staff-projection.service';
 import { OutboxService } from '../../outbox/outbox.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DeliveriesRepository } from '../infra/deliveries.repository';
@@ -38,6 +41,25 @@ interface ConfirmedEventInput {
   correlationId?: string;
 }
 
+/** Filtros del historial por tienda (UC-10), ya desacoplados del DTO HTTP. */
+export interface ListStoreDeliveriesInput {
+  page: number;
+  limit: number;
+  order: 'ASC' | 'DESC';
+  method?: DeliveryMethod;
+  from?: string;
+  to?: string;
+  confirmedByUserId?: string;
+}
+
+/** Estado del proceso de retiro de un pedido (UC-09), objeto de dominio plano. */
+export interface FulfillmentStatusResult {
+  orderId: string;
+  code: { status: PickupCodeStatus; expiresAt: Date; usedAt: Date | null } | null;
+  delivery: { method: DeliveryMethod; deliveredAt: Date; confirmedByUserId: string } | null;
+  failure: { reason: DeliveryFailureReason; occurredAt: Date; note: string | null } | null;
+}
+
 /**
  * Confirmación y registro de entregas (CLAUDE.md §UC-04/05/06). Todas las mutaciones escriben
  * la `Delivery` y encolan el evento de salida en la MISMA transacción (Outbox, RN-16).
@@ -50,6 +72,7 @@ export class DeliveriesService {
     private readonly codesRepo: CodesRepository,
     private readonly deliveriesRepo: DeliveriesRepository,
     private readonly orderProjection: OrderProjectionService,
+    private readonly storeStaff: StoreStaffProjectionService,
     private readonly outbox: OutboxService,
   ) {}
 
@@ -214,6 +237,83 @@ export class DeliveriesService {
       });
       // Auditoría DELIVERY_FAILED: se añade al integrar el módulo de auditoría.
       return delivery;
+    });
+  }
+
+  /**
+   * UC-09: estado del proceso de retiro de un pedido (no el estado del pedido). Lo puede ver
+   * el comprador dueño, owner/staff de la tienda, o ADMIN; cualquier otro recibe 403.
+   */
+  async getFulfillmentStatus(
+    orderId: string,
+    user: CurrentUserData,
+  ): Promise<FulfillmentStatusResult> {
+    const projection = await this.orderProjection.getByOrderId(orderId);
+    const code = await this.codesRepo.findLatestByOrderId(orderId);
+    if (!projection && !code) {
+      throw new NotFoundException({
+        code: 'ORDER_NOT_FOUND',
+        message: 'No encontramos información de retiro para este pedido.',
+      });
+    }
+
+    const storeId = projection?.storeId ?? code!.storeId;
+    const buyerId = projection?.buyerId ?? code!.buyerId;
+    await this.assertCanViewStatus(user, buyerId, storeId);
+
+    const deliveries = await this.deliveriesRepo.findAllByOrderId(orderId);
+    const successful = deliveries.find((d) => d.method !== null) ?? null;
+    const failure = deliveries.find((d) => d.failureReason !== null) ?? null;
+
+    return {
+      orderId,
+      code: code
+        ? { status: code.status, expiresAt: code.expiresAt, usedAt: code.usedAt }
+        : null,
+      delivery: successful?.method
+        ? {
+            method: successful.method,
+            deliveredAt: successful.deliveredAt,
+            confirmedByUserId: successful.confirmedByUserId,
+          }
+        : null,
+      failure: failure?.failureReason
+        ? { reason: failure.failureReason, occurredAt: failure.deliveredAt, note: failure.note }
+        : null,
+    };
+  }
+
+  /** UC-10: historial paginado de entregas de una tienda. La autoriza `StoreAccessGuard`. */
+  async listStoreDeliveries(
+    storeId: string,
+    input: ListStoreDeliveriesInput,
+  ): Promise<{ data: Delivery[]; total: number; page: number; limit: number }> {
+    const { data, total } = await this.deliveriesRepo.listByStore(storeId, {
+      page: input.page,
+      limit: input.limit,
+      order: input.order === 'ASC' ? 'asc' : 'desc',
+      method: input.method ?? null,
+      confirmedByUserId: input.confirmedByUserId ?? null,
+      from: input.from ? new Date(input.from) : null,
+      to: input.to ? new Date(input.to) : null,
+    });
+    return { data, total, page: input.page, limit: input.limit };
+  }
+
+  private async assertCanViewStatus(
+    user: CurrentUserData,
+    buyerId: string,
+    storeId: string,
+  ): Promise<void> {
+    if (user.role === 'ADMIN' || user.userId === buyerId) {
+      return;
+    }
+    if (await this.storeStaff.isAuthorized(storeId, user.userId)) {
+      return;
+    }
+    throw new ForbiddenException({
+      code: 'FULFILLMENT_ACCESS_DENIED',
+      message: 'No tienes acceso a la información de retiro de este pedido.',
     });
   }
 
