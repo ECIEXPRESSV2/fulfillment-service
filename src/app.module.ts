@@ -12,6 +12,7 @@ import {
 } from './common/interceptors/correlation-id.interceptor';
 import { GatewayAuthGuard } from './common/guards/gateway-auth.guard';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { CodesModule } from './codes/codes.module';
 import { EventsModule } from './events/events.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -44,6 +45,7 @@ import { PrismaModule } from './prisma/prisma.module';
     PrismaModule,
     OutboxModule,
     EventsModule,
+    CodesModule,
   ],
   controllers: [AppController],
   providers: [
