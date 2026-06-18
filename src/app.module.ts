@@ -6,10 +6,13 @@ import { LoggerModule } from 'nestjs-pino';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { validateEnv } from './config/env.config';
-import { CORRELATION_ID_HEADER } from './common/interceptors/correlation-id.interceptor';
-import { CorrelationIdInterceptor } from './common/interceptors/correlation-id.interceptor';
+import {
+  CORRELATION_ID_HEADER,
+  CorrelationIdInterceptor,
+} from './common/interceptors/correlation-id.interceptor';
 import { GatewayAuthGuard } from './common/guards/gateway-auth.guard';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { EventsModule } from './events/events.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { PrismaModule } from './prisma/prisma.module';
 
@@ -40,6 +43,7 @@ import { PrismaModule } from './prisma/prisma.module';
     }),
     PrismaModule,
     OutboxModule,
+    EventsModule,
   ],
   controllers: [AppController],
   providers: [
