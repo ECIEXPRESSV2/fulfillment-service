@@ -10,6 +10,7 @@ import { CORRELATION_ID_HEADER } from './common/interceptors/correlation-id.inte
 import { CorrelationIdInterceptor } from './common/interceptors/correlation-id.interceptor';
 import { GatewayAuthGuard } from './common/guards/gateway-auth.guard';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { OutboxModule } from './outbox/outbox.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -38,6 +39,7 @@ import { PrismaModule } from './prisma/prisma.module';
       },
     }),
     PrismaModule,
+    OutboxModule,
   ],
   controllers: [AppController],
   providers: [
