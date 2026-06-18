@@ -15,6 +15,6 @@ import { CodesRepository } from './infra/codes.repository';
   imports: [OutboxModule, EventsModule],
   controllers: [CodesController],
   providers: [CodesService, CodesRepository, ShortCodeRateLimiter],
-  exports: [CodesService],
+  exports: [CodesService, CodesRepository],
 })
 export class CodesModule {}

@@ -50,6 +50,14 @@ export class CodesRepository {
     });
   }
 
+  /** Marca un código como `USED` con la hora de uso (confirmación de entrega). */
+  async markUsedById(tx: Prisma.TransactionClient, id: string): Promise<void> {
+    await tx.pickupCode.update({
+      where: { id },
+      data: { status: PickupCodeStatus.USED, usedAt: new Date() },
+    });
+  }
+
   /** Invalida el código `ACTIVE` del pedido (UC-08). Idempotente: solo afecta `ACTIVE`. */
   async invalidateActiveByOrderId(
     tx: Prisma.TransactionClient,

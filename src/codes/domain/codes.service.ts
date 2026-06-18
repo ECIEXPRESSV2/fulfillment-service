@@ -109,6 +109,31 @@ export class CodesService {
    * pasa por rate-limit (RN-11).
    */
   async validateCode(code: string, sellerUserId: string): Promise<ValidationResult> {
+    const { code: found, error } = await this.resolveForValidation(code, sellerUserId);
+    if (error !== null || found === null) {
+      return { valid: false, validationError: error ?? ValidationError.CODE_NOT_FOUND };
+    }
+    return {
+      valid: true,
+      order: {
+        orderId: found.orderId,
+        buyerId: found.buyerId,
+        storeId: found.storeId,
+        expiresAt: found.expiresAt,
+      },
+    };
+  }
+
+  /**
+   * Resuelve y verifica un código (lookup + tienda + estado), devolviendo el registro y el
+   * primer error encontrado (o `null`). Lo reutilizan tanto la validación (UC-03) como la
+   * confirmación (UC-04), que necesita el registro para marcarlo `USED`. Aplica rate-limit al
+   * código corto. Verifica la tienda antes del estado para no filtrar el estado entre tiendas.
+   */
+  async resolveForValidation(
+    code: string,
+    sellerUserId: string,
+  ): Promise<{ code: PickupCode | null; error: ValidationError | null }> {
     const isShort = looksLikeShortCode(code);
     const lookup = isShort ? normalizeShortCode(code) : code.trim();
 
@@ -124,29 +149,20 @@ export class CodesService {
 
     const found = await this.repo.findByTokenOrShortCode(lookup);
     if (!found) {
-      return { valid: false, validationError: ValidationError.CODE_NOT_FOUND };
+      return { code: null, error: ValidationError.CODE_NOT_FOUND };
     }
 
-    // Verifica la tienda antes de revelar el estado del código (evita fuga entre tiendas).
     const authorized = await this.storeStaff.isAuthorized(found.storeId, sellerUserId);
     if (!authorized) {
-      return { valid: false, validationError: ValidationError.WRONG_STORE };
+      return { code: found, error: ValidationError.WRONG_STORE };
     }
 
-    const stateError = this.checkState(found);
-    if (stateError) {
-      return { valid: false, validationError: stateError };
-    }
+    return { code: found, error: this.checkState(found) };
+  }
 
-    return {
-      valid: true,
-      order: {
-        orderId: found.orderId,
-        buyerId: found.buyerId,
-        storeId: found.storeId,
-        expiresAt: found.expiresAt,
-      },
-    };
+  /** Marca el código como `USED` (transición de confirmación de entrega, UC-04/UC-05). */
+  async markUsed(tx: Prisma.TransactionClient, codeId: string): Promise<void> {
+    await this.repo.markUsedById(tx, codeId);
   }
 
   /** UC-02: el comprador consulta el código de su pedido. */

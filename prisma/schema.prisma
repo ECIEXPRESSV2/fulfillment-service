@@ -72,13 +72,16 @@ model PickupCode {
   //   ON pickup_codes (order_id) WHERE status = 'ACTIVE';
 }
 
-/// Registro de entrega (QR o manual).
+/// Registro de entrega (exitosa o fallida).
+/// - Entrega exitosa: `method` = QR | MANUAL, `failureReason` = null.
+/// - Entrega fallida (UC-06): `method` = null, `failureReason` seteado. Por eso `method`
+///   es opcional (un fallo no tiene método de entrega).
 model Delivery {
   id                String                 @id @default(uuid())
   orderId           String
   storeId           String
   confirmedByUserId String
-  method            DeliveryMethod
+  method            DeliveryMethod?
   deliveredAt       DateTime               @default(now())
   failureReason     DeliveryFailureReason?
   note              String?
