@@ -1,0 +1,167 @@
+// Fulfillment Service — Prisma schema (PostgreSQL).
+// Derivado de los casos de uso del MVP (ver docs/casos-de-uso-mvp.md y CLAUDE.md §5).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Prisma 7: la URL de conexión vive en prisma.config.ts (Migrate) y el cliente
+  // se conecta con un driver adapter (@prisma/adapter-pg) — ver src/prisma/prisma.service.ts.
+}
+
+enum PickupCodeStatus {
+  ACTIVE
+  USED
+  EXPIRED
+  INVALIDATED
+}
+
+enum DeliveryMethod {
+  QR
+  MANUAL
+}
+
+enum DeliveryFailureReason {
+  CUSTOMER_NO_SHOW
+  SELLER_REJECTED
+  ORDER_NOT_AVAILABLE
+  OTHER
+}
+
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
+enum StoreStaffRole {
+  OWNER
+  STAFF
+}
+
+enum AuditAction {
+  CODE_GENERATED
+  CODE_VALIDATED
+  DELIVERY_CONFIRMED
+  MANUAL_DELIVERY
+  DELIVERY_FAILED
+  CODE_INVALIDATED
+  CODE_EXPIRED
+}
+
+/// Código de retiro (la credencial del pedido).
+model PickupCode {
+  id        String           @id @default(uuid())
+  orderId   String
+  buyerId   String
+  storeId   String
+  token     String           @unique // va dentro del QR
+  shortCode String           @unique // tecleo manual (XXXX-XXXX)
+  status    PickupCodeStatus @default(ACTIVE)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  @@index([orderId])
+  @@map("pickup_codes")
+  // Invariante "un solo código ACTIVE por orderId" → índice único parcial en migración SQL:
+  //   CREATE UNIQUE INDEX uniq_active_code_per_order
+  //   ON pickup_codes (order_id) WHERE status = 'ACTIVE';
+}
+
+/// Registro de entrega (QR o manual).
+model Delivery {
+  id                String                 @id @default(uuid())
+  orderId           String
+  storeId           String
+  confirmedByUserId String
+  method            DeliveryMethod
+  deliveredAt       DateTime               @default(now())
+  failureReason     DeliveryFailureReason?
+  note              String?
+  createdAt         DateTime               @default(now())
+
+  @@index([orderId])
+  @@index([storeId])
+  @@map("deliveries")
+}
+
+/// Proyección del contexto del pedido (desde eventos de Order).
+model OrderProjection {
+  orderId         String    @id
+  buyerId         String
+  storeId         String
+  pickupExpiresAt DateTime?
+  status          String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("order_projection")
+}
+
+/// Proyección de autorización de tienda (desde eventos de Identity).
+model StoreStaffProjection {
+  id        String         @id @default(uuid())
+  storeId   String
+  userId    String
+  role      StoreStaffRole
+  isActive  Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([storeId, userId])
+  @@index([storeId])
+  @@map("store_staff")
+}
+
+/// Transactional Outbox.
+model OutboxEvent {
+  id             String       @id @default(uuid())
+  aggregateId    String
+  aggregateType  String
+  eventType      String
+  routingKey     String
+  eventVersion   Int          @default(1)
+  payload        Json
+  status         OutboxStatus @default(PENDING)
+  retryCount     Int          @default(0)
+  lastError      String?
+  idempotencyKey String       @unique
+  nextRetryAt    DateTime?
+  createdAt      DateTime     @default(now())
+  publishedAt    DateTime?
+
+  @@index([status, nextRetryAt])
+  @@map("outbox_events")
+}
+
+/// Dedup de eventos consumidos (idempotencia de consumo).
+model ProcessedEvent {
+  idempotencyKey String   @id
+  routingKey     String
+  processedAt    DateTime @default(now())
+
+  @@map("processed_events")
+}
+
+/// Log append-only de acciones sensibles.
+model AuditLog {
+  id            String      @id @default(uuid())
+  actorId       String?
+  action        AuditAction
+  orderId       String?
+  pickupCodeId  String?
+  deliveryId    String?
+  reason        String?
+  metadata      Json?
+  correlationId String?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime    @default(now())
+
+  @@index([orderId])
+  @@map("audit_logs")
+}
