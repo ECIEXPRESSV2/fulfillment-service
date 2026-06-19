@@ -14,6 +14,7 @@ import { GatewayAuthGuard } from './common/guards/gateway-auth.guard';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { CodesModule } from './codes/codes.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
+import { ConsumerModule } from './events/consumer.module';
 import { EventsModule } from './events/events.module';
 import { ExpirationModule } from './expiration/expiration.module';
 import { OutboxModule } from './outbox/outbox.module';
@@ -52,6 +53,7 @@ import { QrModule } from './qr/qr.module';
     DeliveriesModule,
     QrModule,
     ExpirationModule,
+    ConsumerModule,
   ],
   controllers: [AppController],
   providers: [
