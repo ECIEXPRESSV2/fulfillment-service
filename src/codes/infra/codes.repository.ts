@@ -63,6 +63,26 @@ export class CodesRepository {
     });
   }
 
+  /** Códigos `ACTIVE` ya vencidos (`expiresAt <= now`), en lotes (UC-07). */
+  findActiveExpired(now: Date, take: number): Promise<PickupCode[]> {
+    return this.prisma.pickupCode.findMany({
+      where: { status: PickupCodeStatus.ACTIVE, expiresAt: { lte: now } },
+      take,
+    });
+  }
+
+  /**
+   * Marca un código como `EXPIRED` **solo si sigue `ACTIVE`** (idempotente y seguro ante
+   * carreras con confirmación/cancelación). Devuelve cuántas filas cambiaron (0 o 1).
+   */
+  async markExpiredIfActive(tx: Prisma.TransactionClient, id: string): Promise<number> {
+    const { count } = await tx.pickupCode.updateMany({
+      where: { id, status: PickupCodeStatus.ACTIVE },
+      data: { status: PickupCodeStatus.EXPIRED },
+    });
+    return count;
+  }
+
   /** Invalida el código `ACTIVE` del pedido (UC-08). Idempotente: solo afecta `ACTIVE`. */
   async invalidateActiveByOrderId(
     tx: Prisma.TransactionClient,

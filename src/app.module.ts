@@ -15,6 +15,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { CodesModule } from './codes/codes.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
 import { EventsModule } from './events/events.module';
+import { ExpirationModule } from './expiration/expiration.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { QrModule } from './qr/qr.module';
@@ -50,6 +51,7 @@ import { QrModule } from './qr/qr.module';
     CodesModule,
     DeliveriesModule,
     QrModule,
+    ExpirationModule,
   ],
   controllers: [AppController],
   providers: [
