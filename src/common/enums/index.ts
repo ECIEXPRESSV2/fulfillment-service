@@ -1,0 +1,39 @@
+export enum PickupCodeStatus {
+  ACTIVE = 'ACTIVE',
+  USED = 'USED',
+  EXPIRED = 'EXPIRED',
+  INVALIDATED = 'INVALIDATED',
+}
+
+export enum DeliveryMethod {
+  QR = 'QR',
+  MANUAL = 'MANUAL',
+}
+
+export enum DeliveryFailureReason {
+  CUSTOMER_NO_SHOW = 'CUSTOMER_NO_SHOW',
+  SELLER_REJECTED = 'SELLER_REJECTED',
+  ORDER_NOT_AVAILABLE = 'ORDER_NOT_AVAILABLE',
+  OTHER = 'OTHER',
+}
+
+export enum OutboxStatus {
+  PENDING = 'PENDING',
+  PUBLISHED = 'PUBLISHED',
+  FAILED = 'FAILED',
+}
+
+export enum StoreStaffRole {
+  OWNER = 'OWNER',
+  STAFF = 'STAFF',
+}
+
+export enum AuditAction {
+  CODE_GENERATED = 'CODE_GENERATED',
+  CODE_VALIDATED = 'CODE_VALIDATED',
+  DELIVERY_CONFIRMED = 'DELIVERY_CONFIRMED',
+  MANUAL_DELIVERY = 'MANUAL_DELIVERY',
+  DELIVERY_FAILED = 'DELIVERY_FAILED',
+  CODE_INVALIDATED = 'CODE_INVALIDATED',
+  CODE_EXPIRED = 'CODE_EXPIRED',
+}
