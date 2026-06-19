@@ -17,6 +17,7 @@ import { DeliveriesModule } from './deliveries/deliveries.module';
 import { EventsModule } from './events/events.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { QrModule } from './qr/qr.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { PrismaModule } from './prisma/prisma.module';
     EventsModule,
     CodesModule,
     DeliveriesModule,
+    QrModule,
   ],
   controllers: [AppController],
   providers: [

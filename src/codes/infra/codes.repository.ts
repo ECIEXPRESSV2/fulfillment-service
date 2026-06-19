@@ -43,6 +43,11 @@ export class CodesRepository {
     });
   }
 
+  /** Busca exclusivamente por token (el valor que codifica el QR). */
+  findByToken(token: string): Promise<PickupCode | null> {
+    return this.prisma.pickupCode.findUnique({ where: { token } });
+  }
+
   /** Busca por token (del QR) o por código corto legible. */
   findByTokenOrShortCode(code: string): Promise<PickupCode | null> {
     return this.prisma.pickupCode.findFirst({

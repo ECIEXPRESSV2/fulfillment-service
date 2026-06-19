@@ -88,6 +88,8 @@ async function bootstrap() {
     exclude: [
       { path: '', method: RequestMethod.GET },
       { path: 'health', method: RequestMethod.GET },
+      // Imagen pública del QR: vive en /fulfillment/qr/:file, fuera de /api/v1 (CLAUDE.md §7).
+      { path: 'fulfillment/qr/:file', method: RequestMethod.GET },
     ],
   });
 
