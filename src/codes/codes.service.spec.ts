@@ -1,6 +1,8 @@
 import { ConfigService } from '@nestjs/config';
-import { PickupCode, PickupCodeStatus, Prisma } from '@prisma/client';
+import { EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { PickupCodeStatus } from '../common/enums';
+import { PickupCodeEntity } from '../database/entities/pickup-code.entity';
 import { StoreStaffProjectionService } from '../events/projections/store-staff-projection.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { CodesService } from './domain/codes.service';
@@ -10,9 +12,9 @@ import { CodesRepository } from './infra/codes.repository';
 
 const FALLBACK_HOURS = 8;
 const BASE_URL = 'http://localhost:3005';
-const tx = {} as Prisma.TransactionClient;
+const tx = {} as EntityManager;
 
-function buildCode(overrides: Partial<PickupCode> = {}): PickupCode {
+function buildCode(overrides: Partial<PickupCodeEntity> = {}): PickupCodeEntity {
   return {
     id: 'code-1',
     orderId: 'ord-1',
@@ -26,7 +28,7 @@ function buildCode(overrides: Partial<PickupCode> = {}): PickupCode {
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
-  };
+  } as PickupCodeEntity;
 }
 
 function build() {
@@ -101,7 +103,8 @@ describe('CodesService', () => {
 
       await service.generateForOrder(tx, { orderId: 'ord-1', buyerId: 'b', storeId: 's' });
 
-      const data = repo.create.mock.calls[0][1];
+      // repo.create(data, manager): primer argumento es data
+      const data = repo.create.mock.calls[0][0] as { expiresAt: Date };
       const expectedMs = Date.now() + FALLBACK_HOURS * 3600 * 1000;
       expect(Math.abs(data.expiresAt.getTime() - expectedMs)).toBeLessThan(5000);
     });
@@ -119,7 +122,8 @@ describe('CodesService', () => {
         pickupExpiresAt,
       });
 
-      expect(repo.create.mock.calls[0][1].expiresAt).toEqual(pickupExpiresAt);
+      const data = repo.create.mock.calls[0][0] as { expiresAt: Date };
+      expect(data.expiresAt).toEqual(pickupExpiresAt);
     });
   });
 

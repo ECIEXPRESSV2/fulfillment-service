@@ -1,35 +1,43 @@
-import { AuditAction, Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { Repository } from 'typeorm';
+import { AuditAction } from '../common/enums';
+import { AuditLogEntity } from '../database/entities/audit-log.entity';
 import { AuditService } from './audit.service';
 
-describe('AuditService', () => {
-  it('record escribe la entrada dentro de la tx', async () => {
-    const create = jest.fn().mockResolvedValue(undefined);
-    const tx = { auditLog: { create } } as unknown as Prisma.TransactionClient;
-    const service = new AuditService({} as PrismaService);
+function buildService(repoOverrides: Partial<jest.Mocked<Repository<AuditLogEntity>>> = {}) {
+  const repo = {
+    create: jest.fn().mockImplementation((data) => ({ ...data })),
+    save: jest.fn().mockResolvedValue(undefined),
+    ...repoOverrides,
+  } as unknown as jest.Mocked<Repository<AuditLogEntity>>;
+  return { service: new AuditService(repo), repo };
+}
 
-    await service.record(tx, {
+describe('AuditService', () => {
+  it('record escribe la entrada en el repositorio', async () => {
+    const { service, repo } = buildService();
+
+    await service.record({
       action: AuditAction.DELIVERY_CONFIRMED,
       actorId: 'seller-1',
       orderId: 'ord-1',
       deliveryId: 'dlv-1',
     });
 
-    expect(create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
         action: AuditAction.DELIVERY_CONFIRMED,
         actorId: 'seller-1',
         orderId: 'ord-1',
         deliveryId: 'dlv-1',
       }),
-    });
+    );
+    expect(repo.save).toHaveBeenCalledTimes(1);
   });
 
   it('safeRecord no lanza si la escritura falla (best-effort)', async () => {
-    const prisma = {
-      auditLog: { create: jest.fn().mockRejectedValue(new Error('db caída')) },
-    } as unknown as PrismaService;
-    const service = new AuditService(prisma);
+    const { service } = buildService({
+      save: jest.fn().mockRejectedValue(new Error('db caída')),
+    });
 
     await expect(
       service.safeRecord({ action: AuditAction.CODE_VALIDATED, actorId: 'seller-1' }),

@@ -1,13 +1,14 @@
-import { PickupCode, PickupCodeStatus, Prisma } from '@prisma/client';
+import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { PickupCodeStatus } from '../common/enums';
+import { PickupCodeEntity } from '../database/entities/pickup-code.entity';
 import { CodesRepository } from '../codes/infra/codes.repository';
 import { OutboxService } from '../outbox/outbox.service';
-import { PrismaService } from '../prisma/prisma.service';
 import { ExpirationService } from './expiration.service';
 
-const tx = {} as Prisma.TransactionClient;
+const tx = {} as EntityManager;
 
-function buildCode(overrides: Partial<PickupCode> = {}): PickupCode {
+function buildCode(overrides: Partial<PickupCodeEntity> = {}): PickupCodeEntity {
   return {
     id: 'code-1',
     orderId: 'ord-1',
@@ -21,13 +22,13 @@ function buildCode(overrides: Partial<PickupCode> = {}): PickupCode {
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
-  };
+  } as PickupCodeEntity;
 }
 
 function build() {
-  const prisma = {
-    $transaction: jest.fn((cb: (t: Prisma.TransactionClient) => Promise<unknown>) => cb(tx)),
-  } as unknown as PrismaService;
+  const dataSource = {
+    transaction: jest.fn((cb: (manager: EntityManager) => Promise<unknown>) => cb(tx)),
+  } as unknown as DataSource;
 
   const codesRepo = {
     findActiveExpired: jest.fn(),
@@ -37,7 +38,7 @@ function build() {
   const outbox = { enqueue: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<OutboxService>;
   const audit = { record: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<AuditService>;
 
-  const service = new ExpirationService(prisma, codesRepo, outbox, audit);
+  const service = new ExpirationService(dataSource, codesRepo, outbox, audit);
   return { service, codesRepo, outbox };
 }
 
@@ -66,7 +67,7 @@ describe('ExpirationService', () => {
   it('no publica evento si el código ya no estaba ACTIVE (carrera): idempotente', async () => {
     const { service, codesRepo, outbox } = build();
     codesRepo.findActiveExpired.mockResolvedValue([buildCode()]);
-    codesRepo.markExpiredIfActive.mockResolvedValue(0); // ya no estaba ACTIVE
+    codesRepo.markExpiredIfActive.mockResolvedValue(0);
 
     const result = await service.expireDueCodes();
 

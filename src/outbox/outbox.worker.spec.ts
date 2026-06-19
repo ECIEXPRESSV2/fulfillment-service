@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
-import { OutboxStatus } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { Repository } from 'typeorm';
+import { OutboxStatus } from '../common/enums';
+import { OutboxEventEntity } from '../database/entities/outbox-event.entity';
 import { OutboxWorker } from './outbox.worker';
 import { RabbitmqService } from './rabbitmq.service';
 
@@ -8,11 +9,12 @@ const MAX_RETRIES = 3;
 const POLL_INTERVAL = 5000;
 
 function buildWorker() {
+  const find = jest.fn();
   const update = jest.fn().mockResolvedValue(undefined);
-  const findMany = jest.fn();
-  const prisma = {
-    outboxEvent: { findMany, update },
-  } as unknown as PrismaService;
+  const repo = {
+    find,
+    update,
+  } as unknown as jest.Mocked<Repository<OutboxEventEntity>>;
 
   const publish = jest.fn();
   const rabbitmq = { publish } as unknown as RabbitmqService;
@@ -22,8 +24,8 @@ function buildWorker() {
       key === 'OUTBOX_MAX_RETRIES' ? MAX_RETRIES : POLL_INTERVAL,
   } as unknown as ConfigService;
 
-  const worker = new OutboxWorker(prisma, rabbitmq, config);
-  return { worker, findMany, update, publish };
+  const worker = new OutboxWorker(repo, rabbitmq, config);
+  return { worker, find, update, publish };
 }
 
 const baseEvent = {
@@ -32,60 +34,60 @@ const baseEvent = {
   payload: { orderId: 'ord-1' },
   retryCount: 0,
   idempotencyKey: 'idem-1',
-};
+} as OutboxEventEntity;
 
 describe('OutboxWorker', () => {
   it('publica eventos pendientes y los marca PUBLISHED', async () => {
-    const { worker, findMany, update, publish } = buildWorker();
-    findMany.mockResolvedValue([baseEvent]);
+    const { worker, find, update, publish } = buildWorker();
+    find.mockResolvedValue([baseEvent]);
     publish.mockResolvedValue(undefined);
 
     await worker.drain();
 
     expect(publish).toHaveBeenCalledWith(baseEvent.routingKey, baseEvent.payload);
+    // TypeORM: repo.update(id, partialEntity)
     expect(update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'evt-1' },
-        data: expect.objectContaining({ status: OutboxStatus.PUBLISHED }),
-      }),
+      'evt-1',
+      expect.objectContaining({ status: OutboxStatus.PUBLISHED }),
     );
   });
 
   it('ante fallo transitorio incrementa retryCount y agenda backoff (sigue PENDING)', async () => {
-    const { worker, findMany, update, publish } = buildWorker();
-    findMany.mockResolvedValue([{ ...baseEvent, retryCount: 0 }]);
+    const { worker, find, update, publish } = buildWorker();
+    find.mockResolvedValue([{ ...baseEvent, retryCount: 0 }]);
     publish.mockRejectedValue(new Error('broker caído'));
 
     await worker.drain();
 
-    const data = update.mock.calls[0][0].data;
+    // segundo argumento de update: partial update data
+    const data = update.mock.calls[0][1] as Partial<OutboxEventEntity>;
     expect(data.retryCount).toBe(1);
     expect(data.lastError).toContain('broker caído');
     expect(data.nextRetryAt).toBeInstanceOf(Date);
-    expect(data.status).toBeUndefined(); // permanece PENDING
+    expect((data as Record<string, unknown>).status).toBeUndefined();
   });
 
   it('marca FAILED cuando se agotan los reintentos', async () => {
-    const { worker, findMany, update, publish } = buildWorker();
-    findMany.mockResolvedValue([{ ...baseEvent, retryCount: MAX_RETRIES - 1 }]);
+    const { worker, find, update, publish } = buildWorker();
+    find.mockResolvedValue([{ ...baseEvent, retryCount: MAX_RETRIES - 1 }]);
     publish.mockRejectedValue(new Error('broker caído'));
 
     await worker.drain();
 
-    const data = update.mock.calls[0][0].data;
+    const data = update.mock.calls[0][1] as Partial<OutboxEventEntity>;
     expect(data.status).toBe(OutboxStatus.FAILED);
     expect(data.retryCount).toBe(MAX_RETRIES);
   });
 
   it('no procesa en paralelo si ya hay un ciclo corriendo', async () => {
-    const { worker, findMany } = buildWorker();
-    let resolveFind!: (v: unknown[]) => void;
-    findMany.mockReturnValue(new Promise((r) => (resolveFind = r)));
+    const { worker, find } = buildWorker();
+    let resolveFind!: (v: OutboxEventEntity[]) => void;
+    find.mockReturnValue(new Promise((r) => (resolveFind = r)));
 
     const first = worker.drain();
-    await worker.drain(); // debe salir inmediatamente sin segundo findMany
+    await worker.drain(); // debe salir inmediatamente sin segundo find
 
-    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(find).toHaveBeenCalledTimes(1);
     resolveFind([]);
     await first;
   });

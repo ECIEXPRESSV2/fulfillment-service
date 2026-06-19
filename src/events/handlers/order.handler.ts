@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AuditAction, Prisma } from '@prisma/client';
+import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
+import { AuditAction } from '../../common/enums';
 import { CodesService } from '../../codes/domain/codes.service';
-import { PrismaService } from '../../prisma/prisma.service';
 import { IdempotencyService } from '../idempotency.service';
 import { OrderProjectionService } from '../projections/order-projection.service';
 
@@ -24,7 +24,7 @@ export class OrderHandler {
   private readonly logger = new Logger(OrderHandler.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly dataSource: DataSource,
     private readonly orderProjection: OrderProjectionService,
     private readonly codesService: CodesService,
     private readonly idempotency: IdempotencyService,
@@ -38,20 +38,20 @@ export class OrderHandler {
     }
 
     try {
-      await this.prisma.$transaction(async (tx) => {
+      await this.dataSource.transaction(async (manager) => {
         switch (routingKey) {
           case ORDER_ROUTING_KEYS.confirmed:
-            await this.onConfirmed(event, tx);
+            await this.onConfirmed(event, manager);
             break;
           case ORDER_ROUTING_KEYS.cancelled:
-            await this.onCancelled(event, tx);
+            await this.onCancelled(event, manager);
             break;
           default:
             this.logger.debug({ routingKey }, 'Evento de Order ignorado (no aplica)');
             return;
         }
         if (idempotencyKey) {
-          await this.idempotency.markProcessed(tx, idempotencyKey, routingKey);
+          await this.idempotency.markProcessed(manager, idempotencyKey, routingKey);
         }
       });
     } catch (error) {
@@ -63,7 +63,7 @@ export class OrderHandler {
   }
 
   /** UC-01: proyecta el pedido y genera su código de retiro. */
-  private async onConfirmed(event: EventRecord, tx: Prisma.TransactionClient): Promise<void> {
+  private async onConfirmed(event: EventRecord, manager: EntityManager): Promise<void> {
     const orderId = this.str(event.orderId);
     const buyerId = this.str(event.buyerId);
     const storeId = this.str(event.storeId);
@@ -73,8 +73,8 @@ export class OrderHandler {
     }
     const pickupExpiresAt = this.date(event.pickupExpiresAt);
 
-    await this.orderProjection.upsertFromConfirmed({ orderId, buyerId, storeId, pickupExpiresAt }, tx);
-    await this.codesService.generateForOrder(tx, {
+    await this.orderProjection.upsertFromConfirmed({ orderId, buyerId, storeId, pickupExpiresAt }, manager);
+    await this.codesService.generateForOrder(manager, {
       orderId,
       buyerId,
       storeId,
@@ -84,32 +84,34 @@ export class OrderHandler {
   }
 
   /** UC-08: marca el pedido cancelado e invalida su código `ACTIVE`. */
-  private async onCancelled(event: EventRecord, tx: Prisma.TransactionClient): Promise<void> {
+  private async onCancelled(event: EventRecord, manager: EntityManager): Promise<void> {
     const orderId = this.str(event.orderId);
     if (!orderId) {
       this.logger.warn({ event }, 'order.order.cancelled sin orderId; se ignora');
       return;
     }
 
-    await this.orderProjection.markCancelled(orderId, tx);
-    const { invalidated, alreadyDelivered } = await this.codesService.invalidateByOrder(tx, orderId);
+    await this.orderProjection.markCancelled(orderId, manager);
+    const { invalidated, alreadyDelivered } = await this.codesService.invalidateByOrder(manager, orderId);
     const correlationId = this.str(event.correlationId);
 
     if (invalidated) {
-      await this.audit.record(tx, {
-        action: AuditAction.CODE_INVALIDATED,
-        orderId,
-        correlationId,
-      });
+      await this.audit.record(
+        { action: AuditAction.CODE_INVALIDATED, orderId, correlationId },
+        manager,
+      );
     } else if (alreadyDelivered) {
       // RN-15: el pedido ya se entregó; la cancelación no se revierte, se deja la inconsistencia.
-      await this.audit.record(tx, {
-        action: AuditAction.CODE_INVALIDATED,
-        orderId,
-        reason: 'Cancelación recibida tras la entrega; no se revierte.',
-        metadata: { inconsistency: 'cancelled_after_delivery' },
-        correlationId,
-      });
+      await this.audit.record(
+        {
+          action: AuditAction.CODE_INVALIDATED,
+          orderId,
+          reason: 'Cancelación recibida tras la entrega; no se revierte.',
+          metadata: { inconsistency: 'cancelled_after_delivery' },
+          correlationId,
+        },
+        manager,
+      );
     }
   }
 

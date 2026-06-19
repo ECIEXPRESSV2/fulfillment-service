@@ -1,16 +1,15 @@
-import { Prisma } from '@prisma/client';
+import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { CodesService } from '../../codes/domain/codes.service';
-import { PrismaService } from '../../prisma/prisma.service';
 import { IdempotencyService } from '../idempotency.service';
 import { OrderProjectionService } from '../projections/order-projection.service';
 import { OrderHandler, ORDER_ROUTING_KEYS } from './order.handler';
 
 function build() {
-  const txMock = {} as Prisma.TransactionClient;
-  const prisma = {
-    $transaction: jest.fn((cb: (tx: Prisma.TransactionClient) => Promise<unknown>) => cb(txMock)),
-  } as unknown as PrismaService;
+  const tx = {} as EntityManager;
+  const dataSource = {
+    transaction: jest.fn((cb: (manager: EntityManager) => Promise<unknown>) => cb(tx)),
+  } as unknown as DataSource;
 
   const orderProjection = {
     upsertFromConfirmed: jest.fn().mockResolvedValue(undefined),
@@ -30,8 +29,8 @@ function build() {
 
   const audit = { record: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<AuditService>;
 
-  const handler = new OrderHandler(prisma, orderProjection, codesService, idempotency, audit);
-  return { handler, orderProjection, codesService, idempotency, audit };
+  const handler = new OrderHandler(dataSource, orderProjection, codesService, idempotency, audit);
+  return { handler, orderProjection, codesService, idempotency, audit, dataSource };
 }
 
 describe('OrderHandler', () => {
@@ -64,9 +63,10 @@ describe('OrderHandler', () => {
 
     expect(orderProjection.markCancelled).toHaveBeenCalledWith('ord-1', expect.anything());
     expect(codesService.invalidateByOrder).toHaveBeenCalledWith(expect.anything(), 'ord-1');
+    // audit.record: entry primero, manager después
     expect(audit.record).toHaveBeenCalledWith(
-      expect.anything(),
       expect.objectContaining({ action: 'CODE_INVALIDATED', orderId: 'ord-1' }),
+      expect.anything(),
     );
   });
 
@@ -80,11 +80,11 @@ describe('OrderHandler', () => {
     await handler.handle(ORDER_ROUTING_KEYS.cancelled, { orderId: 'ord-1', idempotencyKey: 'idem-9' });
 
     expect(audit.record).toHaveBeenCalledWith(
-      expect.anything(),
       expect.objectContaining({
         action: 'CODE_INVALIDATED',
         metadata: { inconsistency: 'cancelled_after_delivery' },
       }),
+      expect.anything(),
     );
   });
 

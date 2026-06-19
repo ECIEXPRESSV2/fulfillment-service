@@ -14,12 +14,12 @@ import { GatewayAuthGuard } from './common/guards/gateway-auth.guard';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { AuditModule } from './audit/audit.module';
 import { CodesModule } from './codes/codes.module';
+import { DatabaseModule } from './database/database.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
 import { ConsumerModule } from './events/consumer.module';
 import { EventsModule } from './events/events.module';
 import { ExpirationModule } from './expiration/expiration.module';
 import { OutboxModule } from './outbox/outbox.module';
-import { PrismaModule } from './prisma/prisma.module';
 import { QrModule } from './qr/qr.module';
 
 @Module({
@@ -47,7 +47,7 @@ import { QrModule } from './qr/qr.module';
         redact: ['req.headers.authorization', 'req.headers.cookie'],
       },
     }),
-    PrismaModule,
+    DatabaseModule,
     AuditModule,
     OutboxModule,
     EventsModule,

@@ -1,14 +1,13 @@
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
+import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
 import { IdempotencyService } from '../idempotency.service';
 import { StoreStaffProjectionService } from '../projections/store-staff-projection.service';
 import { IdentityHandler, IDENTITY_ROUTING_KEYS } from './identity.handler';
 
 function build() {
-  const txMock = {} as Prisma.TransactionClient;
-  const prisma = {
-    $transaction: jest.fn((cb: (tx: Prisma.TransactionClient) => Promise<unknown>) => cb(txMock)),
-  } as unknown as PrismaService;
+  const tx = {} as EntityManager;
+  const dataSource = {
+    transaction: jest.fn((cb: (manager: EntityManager) => Promise<unknown>) => cb(tx)),
+  } as unknown as DataSource;
 
   const storeStaff = {
     upsertOwner: jest.fn().mockResolvedValue(undefined),
@@ -22,8 +21,8 @@ function build() {
     isDuplicateError: jest.fn().mockReturnValue(false),
   } as unknown as jest.Mocked<IdempotencyService>;
 
-  const handler = new IdentityHandler(prisma, storeStaff, idempotency);
-  return { handler, storeStaff, idempotency, prisma };
+  const handler = new IdentityHandler(dataSource, storeStaff, idempotency);
+  return { handler, storeStaff, idempotency, dataSource };
 }
 
 describe('IdentityHandler', () => {
@@ -36,8 +35,10 @@ describe('IdentityHandler', () => {
       idempotencyKey: 'idem-1',
     });
 
+    // upsertOwner(storeId, ownerId, manager) — parámetros aplanados
     expect(storeStaff.upsertOwner).toHaveBeenCalledWith(
-      { storeId: 'str-1', userId: 'usr-owner' },
+      'str-1',
+      'usr-owner',
       expect.anything(),
     );
     expect(idempotency.markProcessed).toHaveBeenCalledWith(
@@ -57,8 +58,10 @@ describe('IdentityHandler', () => {
       idempotencyKey: 'idem-2',
     });
 
+    // assignStaff(storeId, userId, manager) — parámetros aplanados
     expect(storeStaff.assignStaff).toHaveBeenCalledWith(
-      { storeId: 'str-1', userId: 'usr-2' },
+      'str-1',
+      'usr-2',
       expect.anything(),
     );
   });
@@ -73,8 +76,10 @@ describe('IdentityHandler', () => {
       idempotencyKey: 'idem-3',
     });
 
+    // removeStaff(storeId, userId, manager) — parámetros aplanados
     expect(storeStaff.removeStaff).toHaveBeenCalledWith(
-      { storeId: 'str-1', userId: 'usr-2' },
+      'str-1',
+      'usr-2',
       expect.anything(),
     );
   });
@@ -102,12 +107,13 @@ describe('IdentityHandler', () => {
   });
 
   it('traga la violación de unicidad si otro consumidor procesó en paralelo', async () => {
-    const { handler, idempotency, prisma } = build();
-    const dupError = new Prisma.PrismaClientKnownRequestError('dup', {
-      code: 'P2002',
-      clientVersion: '7.8.0',
-    });
-    (prisma.$transaction as jest.Mock).mockRejectedValue(dupError);
+    const { handler, idempotency, dataSource } = build();
+    // Simula QueryFailedError de TypeORM con pg unique violation code 23505
+    const dupError = Object.assign(
+      new QueryFailedError('INSERT INTO processed_events ...', [], new Error('duplicate key')),
+      { code: '23505' },
+    );
+    (dataSource.transaction as jest.Mock).mockRejectedValue(dupError);
     (idempotency.isDuplicateError as jest.Mock).mockReturnValue(true);
 
     await expect(

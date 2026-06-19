@@ -1,18 +1,20 @@
-import { Delivery, DeliveryFailureReason, DeliveryMethod, PickupCode, PickupCodeStatus, Prisma } from '@prisma/client';
+import { DataSource, EntityManager } from 'typeorm';
 import { CodesService } from '../codes/domain/codes.service';
 import { ValidationError } from '../codes/domain/pickup-code.types';
 import { AuditService } from '../audit/audit.service';
 import { CodesRepository } from '../codes/infra/codes.repository';
+import { DeliveryFailureReason, DeliveryMethod, PickupCodeStatus } from '../common/enums';
+import { DeliveryEntity } from '../database/entities/delivery.entity';
+import { PickupCodeEntity } from '../database/entities/pickup-code.entity';
 import { OrderProjectionService } from '../events/projections/order-projection.service';
 import { StoreStaffProjectionService } from '../events/projections/store-staff-projection.service';
 import { OutboxService } from '../outbox/outbox.service';
-import { PrismaService } from '../prisma/prisma.service';
 import { DeliveriesService } from './domain/deliveries.service';
 import { DeliveriesRepository } from './infra/deliveries.repository';
 
-const tx = {} as Prisma.TransactionClient;
+const tx = {} as EntityManager;
 
-function buildCode(overrides: Partial<PickupCode> = {}): PickupCode {
+function buildCode(overrides: Partial<PickupCodeEntity> = {}): PickupCodeEntity {
   return {
     id: 'code-1',
     orderId: 'ord-1',
@@ -26,10 +28,10 @@ function buildCode(overrides: Partial<PickupCode> = {}): PickupCode {
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
-  };
+  } as PickupCodeEntity;
 }
 
-function buildDelivery(overrides: Partial<Delivery> = {}): Delivery {
+function buildDelivery(overrides: Partial<DeliveryEntity> = {}): DeliveryEntity {
   return {
     id: 'dlv-1',
     orderId: 'ord-1',
@@ -41,13 +43,13 @@ function buildDelivery(overrides: Partial<Delivery> = {}): Delivery {
     note: null,
     createdAt: new Date(),
     ...overrides,
-  };
+  } as DeliveryEntity;
 }
 
 function build() {
-  const prisma = {
-    $transaction: jest.fn((cb: (t: Prisma.TransactionClient) => Promise<unknown>) => cb(tx)),
-  } as unknown as PrismaService;
+  const dataSource = {
+    transaction: jest.fn((cb: (manager: EntityManager) => Promise<unknown>) => cb(tx)),
+  } as unknown as DataSource;
 
   const codesService = {
     resolveForValidation: jest.fn(),
@@ -79,7 +81,7 @@ function build() {
   const audit = { record: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<AuditService>;
 
   const service = new DeliveriesService(
-    prisma,
+    dataSource,
     codesService,
     codesRepo,
     deliveriesRepo,
@@ -101,8 +103,8 @@ describe('DeliveriesService', () => {
 
       expect(codesService.markUsed).toHaveBeenCalledWith(tx, 'code-1');
       expect(deliveriesRepo.create).toHaveBeenCalledWith(
-        tx,
         expect.objectContaining({ method: DeliveryMethod.QR, orderId: 'ord-1' }),
+        tx,
       );
       expect(outbox.enqueue).toHaveBeenCalledWith(
         tx,
@@ -167,8 +169,8 @@ describe('DeliveriesService', () => {
 
       expect(codesService.markUsed).toHaveBeenCalledWith(tx, 'code-1');
       expect(deliveriesRepo.create).toHaveBeenCalledWith(
-        tx,
         expect.objectContaining({ method: DeliveryMethod.MANUAL, note: 'cámara falló' }),
+        tx,
       );
       expect(outbox.enqueue).toHaveBeenCalledWith(
         tx,
@@ -204,8 +206,8 @@ describe('DeliveriesService', () => {
 
       expect(codesService.markUsed).not.toHaveBeenCalled();
       expect(deliveriesRepo.create).toHaveBeenCalledWith(
-        tx,
         expect.objectContaining({ method: null, failureReason: DeliveryFailureReason.CUSTOMER_NO_SHOW }),
+        tx,
       );
       expect(outbox.enqueue).toHaveBeenCalledWith(
         tx,
@@ -288,7 +290,7 @@ describe('DeliveriesService', () => {
 
       expect(deliveriesRepo.listByStore).toHaveBeenCalledWith(
         'str-1',
-        expect.objectContaining({ page: 2, limit: 10, order: 'asc', method: DeliveryMethod.QR, from: expect.any(Date) }),
+        expect.objectContaining({ page: 2, limit: 10, order: 'ASC', method: DeliveryMethod.QR, from: expect.any(Date) }),
       );
       expect(result).toEqual({ data: expect.any(Array), total: 1, page: 2, limit: 10 });
     });

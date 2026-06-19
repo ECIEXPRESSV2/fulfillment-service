@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { PickupCodeEntity } from '../database/entities/pickup-code.entity';
 import { EventsModule } from '../events/events.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { CodesService } from './domain/codes.service';
@@ -12,7 +14,7 @@ import { CodesRepository } from './infra/codes.repository';
  * Exporta `CodesService` para que el `order.handler` lo use al consumir `order.order.*`.
  */
 @Module({
-  imports: [OutboxModule, EventsModule],
+  imports: [TypeOrmModule.forFeature([PickupCodeEntity]), OutboxModule, EventsModule],
   controllers: [CodesController],
   providers: [CodesService, CodesRepository, ShortCodeRateLimiter],
   exports: [CodesService, CodesRepository],

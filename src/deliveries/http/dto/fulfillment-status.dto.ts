@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { DeliveryFailureReason, DeliveryMethod, PickupCodeStatus } from '@prisma/client';
+import { DeliveryFailureReason, DeliveryMethod, PickupCodeStatus } from '../../../common/enums';
 
 class CodeStatusDto {
   @ApiProperty({ enum: PickupCodeStatus, example: PickupCodeStatus.USED })

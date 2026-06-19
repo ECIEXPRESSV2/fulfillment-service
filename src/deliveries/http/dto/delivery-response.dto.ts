@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Delivery, DeliveryFailureReason, DeliveryMethod } from '@prisma/client';
+import { DeliveryFailureReason, DeliveryMethod } from '../../../common/enums';
+import { DeliveryEntity } from '../../../database/entities/delivery.entity';
 
 /** Respuesta de las operaciones de entrega (confirmar, manual, fallida). */
 export class DeliveryResponseDto {
@@ -40,7 +41,7 @@ export class DeliveryResponseDto {
   @ApiPropertyOptional({ description: 'Nota asociada.', nullable: true, example: null })
   note!: string | null;
 
-  static from(delivery: Delivery): DeliveryResponseDto {
+  static from(delivery: DeliveryEntity): DeliveryResponseDto {
     return Object.assign(new DeliveryResponseDto(), {
       id: delivery.id,
       orderId: delivery.orderId,

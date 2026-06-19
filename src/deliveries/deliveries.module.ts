@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { CodesModule } from '../codes/codes.module';
+import { DeliveryEntity } from '../database/entities/delivery.entity';
 import { EventsModule } from '../events/events.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { DeliveriesService } from './domain/deliveries.service';
@@ -12,7 +14,7 @@ import { DeliveriesRepository } from './infra/deliveries.repository';
  * (publicar `delivery.confirmed` / `delivery.failed`).
  */
 @Module({
-  imports: [CodesModule, EventsModule, OutboxModule],
+  imports: [TypeOrmModule.forFeature([DeliveryEntity]), CodesModule, EventsModule, OutboxModule],
   controllers: [DeliveriesController],
   providers: [DeliveriesService, DeliveriesRepository],
   exports: [DeliveriesService],

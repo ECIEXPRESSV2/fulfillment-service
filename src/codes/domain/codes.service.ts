@@ -6,9 +6,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AuditAction, PickupCode, PickupCodeStatus, Prisma } from '@prisma/client';
+import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { EnvironmentVariables } from '../../config/env.config';
+import { AuditAction, PickupCodeStatus } from '../../common/enums';
+import { PickupCodeEntity } from '../../database/entities/pickup-code.entity';
 import { StoreStaffProjectionService } from '../../events/projections/store-staff-projection.service';
 import { OutboxService } from '../../outbox/outbox.service';
 import { CodesRepository } from '../infra/codes.repository';
@@ -62,14 +64,14 @@ export class CodesService {
 
   /**
    * UC-01: genera el código `ACTIVE` del pedido y encola `fulfillment.qr.generated` en el
-   * outbox, todo dentro de la tx del handler. Idempotente: si ya hay un código `ACTIVE`, lo
+   * outbox, todo dentro del manager transaccional. Idempotente: si ya hay un código `ACTIVE`, lo
    * devuelve sin crear otro ni republicar (RN-02).
    */
   async generateForOrder(
-    tx: Prisma.TransactionClient,
+    manager: EntityManager,
     input: GenerateCodeInput,
-  ): Promise<{ created: boolean; code: PickupCode }> {
-    const existing = await this.repo.findActiveByOrderId(input.orderId, tx);
+  ): Promise<{ created: boolean; code: PickupCodeEntity }> {
+    const existing = await this.repo.findActiveByOrderId(input.orderId, manager);
     if (existing) {
       return { created: false, code: existing };
     }
@@ -78,16 +80,19 @@ export class CodesService {
     const shortCode = generateShortCode();
     const expiresAt = this.computeExpiresAt(input.pickupExpiresAt);
 
-    const code = await this.repo.create(tx, {
-      orderId: input.orderId,
-      buyerId: input.buyerId,
-      storeId: input.storeId,
-      token,
-      shortCode,
-      expiresAt,
-    });
+    const code = await this.repo.create(
+      {
+        orderId: input.orderId,
+        buyerId: input.buyerId,
+        storeId: input.storeId,
+        token,
+        shortCode,
+        expiresAt,
+      },
+      manager,
+    );
 
-    await this.outbox.enqueue(tx, {
+    await this.outbox.enqueue(manager, {
       aggregateId: input.orderId,
       aggregateType: 'PickupCode',
       eventType: 'qr.generated',
@@ -102,12 +107,15 @@ export class CodesService {
       correlationId: input.correlationId,
     });
 
-    await this.audit.record(tx, {
-      action: AuditAction.CODE_GENERATED,
-      orderId: input.orderId,
-      pickupCodeId: code.id,
-      correlationId: input.correlationId,
-    });
+    await this.audit.record(
+      {
+        action: AuditAction.CODE_GENERATED,
+        orderId: input.orderId,
+        pickupCodeId: code.id,
+        correlationId: input.correlationId,
+      },
+      manager,
+    );
 
     return { created: true, code };
   }
@@ -147,13 +155,12 @@ export class CodesService {
   /**
    * Resuelve y verifica un código (lookup + tienda + estado), devolviendo el registro y el
    * primer error encontrado (o `null`). Lo reutilizan tanto la validación (UC-03) como la
-   * confirmación (UC-04), que necesita el registro para marcarlo `USED`. Aplica rate-limit al
-   * código corto. Verifica la tienda antes del estado para no filtrar el estado entre tiendas.
+   * confirmación (UC-04). Aplica rate-limit al código corto.
    */
   async resolveForValidation(
     code: string,
     sellerUserId: string,
-  ): Promise<{ code: PickupCode | null; error: ValidationError | null }> {
+  ): Promise<{ code: PickupCodeEntity | null; error: ValidationError | null }> {
     const isShort = looksLikeShortCode(code);
     const lookup = isShort ? normalizeShortCode(code) : code.trim();
 
@@ -181,8 +188,8 @@ export class CodesService {
   }
 
   /** Marca el código como `USED` (transición de confirmación de entrega, UC-04/UC-05). */
-  async markUsed(tx: Prisma.TransactionClient, codeId: string): Promise<void> {
-    await this.repo.markUsedById(tx, codeId);
+  async markUsed(manager: EntityManager, codeId: string): Promise<void> {
+    await this.repo.markUsedById(codeId, manager);
   }
 
   /** UC-02: el comprador consulta el código de su pedido. */
@@ -218,10 +225,10 @@ export class CodesService {
    * si registrar inconsistencia en auditoría cuando el pedido ya estaba entregado (RN-15).
    */
   async invalidateByOrder(
-    tx: Prisma.TransactionClient,
+    manager: EntityManager,
     orderId: string,
   ): Promise<{ invalidated: boolean; alreadyDelivered: boolean }> {
-    const count = await this.repo.invalidateActiveByOrderId(tx, orderId);
+    const count = await this.repo.invalidateActiveByOrderId(orderId, manager);
     if (count > 0) {
       return { invalidated: true, alreadyDelivered: false };
     }
@@ -232,7 +239,7 @@ export class CodesService {
   }
 
   /** Devuelve el primer error de estado del código, o `null` si es válido. */
-  private checkState(code: PickupCode): ValidationError | null {
+  private checkState(code: PickupCodeEntity): ValidationError | null {
     if (code.status === PickupCodeStatus.INVALIDATED) {
       return ValidationError.CODE_INVALIDATED;
     }

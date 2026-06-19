@@ -5,23 +5,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import {
-  AuditAction,
-  Delivery,
-  DeliveryFailureReason,
-  DeliveryMethod,
-  PickupCodeStatus,
-  Prisma,
-} from '@prisma/client';
+import { DataSource } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { CodesService } from '../../codes/domain/codes.service';
 import { ValidationError } from '../../codes/domain/pickup-code.types';
 import { CodesRepository } from '../../codes/infra/codes.repository';
 import { CurrentUserData } from '../../common/decorators/current-user.decorator';
+import { AuditAction, DeliveryFailureReason, DeliveryMethod, PickupCodeStatus } from '../../common/enums';
+import { DeliveryEntity } from '../../database/entities/delivery.entity';
 import { OrderProjectionService } from '../../events/projections/order-projection.service';
 import { StoreStaffProjectionService } from '../../events/projections/store-staff-projection.service';
 import { OutboxService } from '../../outbox/outbox.service';
-import { PrismaService } from '../../prisma/prisma.service';
 import { DeliveriesRepository } from '../infra/deliveries.repository';
 
 export interface ManualDeliveryInput {
@@ -69,7 +63,7 @@ export interface FulfillmentStatusResult {
 @Injectable()
 export class DeliveriesService {
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly dataSource: DataSource,
     private readonly codesService: CodesService,
     private readonly codesRepo: CodesRepository,
     private readonly deliveriesRepo: DeliveriesRepository,
@@ -88,7 +82,7 @@ export class DeliveriesService {
     code: string,
     sellerUserId: string,
     correlationId?: string,
-  ): Promise<Delivery> {
+  ): Promise<DeliveryEntity> {
     const { code: found, error } = await this.codesService.resolveForValidation(code, sellerUserId);
 
     if (!found) {
@@ -126,15 +120,18 @@ export class DeliveriesService {
       });
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      await this.codesService.markUsed(tx, found.id);
-      const delivery = await this.deliveriesRepo.create(tx, {
-        orderId: found.orderId,
-        storeId: found.storeId,
-        confirmedByUserId: sellerUserId,
-        method: DeliveryMethod.QR,
-      });
-      await this.enqueueConfirmed(tx, {
+    return this.dataSource.transaction(async (manager) => {
+      await this.codesService.markUsed(manager, found.id);
+      const delivery = await this.deliveriesRepo.create(
+        {
+          orderId: found.orderId,
+          storeId: found.storeId,
+          confirmedByUserId: sellerUserId,
+          method: DeliveryMethod.QR,
+        },
+        manager,
+      );
+      await this.enqueueConfirmed(manager, {
         orderId: found.orderId,
         buyerId: found.buyerId,
         storeId: found.storeId,
@@ -142,14 +139,17 @@ export class DeliveriesService {
         deliveredAt: delivery.deliveredAt,
         correlationId,
       });
-      await this.audit.record(tx, {
-        action: AuditAction.DELIVERY_CONFIRMED,
-        actorId: sellerUserId,
-        orderId: found.orderId,
-        deliveryId: delivery.id,
-        metadata: { method: DeliveryMethod.QR },
-        correlationId,
-      });
+      await this.audit.record(
+        {
+          action: AuditAction.DELIVERY_CONFIRMED,
+          actorId: sellerUserId,
+          orderId: found.orderId,
+          deliveryId: delivery.id,
+          metadata: { method: DeliveryMethod.QR },
+          correlationId,
+        },
+        manager,
+      );
       return delivery;
     });
   }
@@ -164,7 +164,7 @@ export class DeliveriesService {
     sellerUserId: string,
     input: ManualDeliveryInput,
     correlationId?: string,
-  ): Promise<Delivery> {
+  ): Promise<DeliveryEntity> {
     const projection = await this.orderProjection.getByOrderId(orderId);
     if (!projection) {
       throw new NotFoundException({
@@ -178,20 +178,23 @@ export class DeliveriesService {
       return existing; // idempotente: ya se entregó
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const activeCode = await this.codesRepo.findActiveByOrderId(orderId, tx);
+    return this.dataSource.transaction(async (manager) => {
+      const activeCode = await this.codesRepo.findActiveByOrderId(orderId, manager);
       if (activeCode) {
-        await this.codesService.markUsed(tx, activeCode.id);
+        await this.codesService.markUsed(manager, activeCode.id);
       }
       const note = input.note ? `${input.reason} — ${input.note}` : input.reason;
-      const delivery = await this.deliveriesRepo.create(tx, {
-        orderId,
-        storeId: projection.storeId,
-        confirmedByUserId: sellerUserId,
-        method: DeliveryMethod.MANUAL,
-        note,
-      });
-      await this.enqueueConfirmed(tx, {
+      const delivery = await this.deliveriesRepo.create(
+        {
+          orderId,
+          storeId: projection.storeId,
+          confirmedByUserId: sellerUserId,
+          method: DeliveryMethod.MANUAL,
+          note,
+        },
+        manager,
+      );
+      await this.enqueueConfirmed(manager, {
         orderId,
         buyerId: projection.buyerId,
         storeId: projection.storeId,
@@ -199,14 +202,17 @@ export class DeliveriesService {
         deliveredAt: delivery.deliveredAt,
         correlationId,
       });
-      await this.audit.record(tx, {
-        action: AuditAction.MANUAL_DELIVERY,
-        actorId: sellerUserId,
-        orderId,
-        deliveryId: delivery.id,
-        reason: input.reason,
-        correlationId,
-      });
+      await this.audit.record(
+        {
+          action: AuditAction.MANUAL_DELIVERY,
+          actorId: sellerUserId,
+          orderId,
+          deliveryId: delivery.id,
+          reason: input.reason,
+          correlationId,
+        },
+        manager,
+      );
       return delivery;
     });
   }
@@ -220,7 +226,7 @@ export class DeliveriesService {
     sellerUserId: string,
     input: DeliveryFailureInput,
     correlationId?: string,
-  ): Promise<Delivery> {
+  ): Promise<DeliveryEntity> {
     const projection = await this.orderProjection.getByOrderId(orderId);
     if (!projection) {
       throw new NotFoundException({
@@ -235,16 +241,19 @@ export class DeliveriesService {
       });
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const delivery = await this.deliveriesRepo.create(tx, {
-        orderId,
-        storeId: projection.storeId,
-        confirmedByUserId: sellerUserId,
-        method: null,
-        failureReason: input.reason,
-        note: input.note ?? null,
-      });
-      await this.outbox.enqueue(tx, {
+    return this.dataSource.transaction(async (manager) => {
+      const delivery = await this.deliveriesRepo.create(
+        {
+          orderId,
+          storeId: projection.storeId,
+          confirmedByUserId: sellerUserId,
+          method: null,
+          failureReason: input.reason,
+          note: input.note ?? null,
+        },
+        manager,
+      );
+      await this.outbox.enqueue(manager, {
         aggregateId: orderId,
         aggregateType: 'Delivery',
         eventType: 'delivery.failed',
@@ -252,15 +261,18 @@ export class DeliveriesService {
         business: { orderId, buyerId: projection.buyerId, reason: input.reason },
         correlationId,
       });
-      await this.audit.record(tx, {
-        action: AuditAction.DELIVERY_FAILED,
-        actorId: sellerUserId,
-        orderId,
-        deliveryId: delivery.id,
-        reason: input.note ?? undefined,
-        metadata: { failureReason: input.reason },
-        correlationId,
-      });
+      await this.audit.record(
+        {
+          action: AuditAction.DELIVERY_FAILED,
+          actorId: sellerUserId,
+          orderId,
+          deliveryId: delivery.id,
+          reason: input.note ?? undefined,
+          metadata: { failureReason: input.reason },
+          correlationId,
+        },
+        manager,
+      );
       return delivery;
     });
   }
@@ -312,11 +324,11 @@ export class DeliveriesService {
   async listStoreDeliveries(
     storeId: string,
     input: ListStoreDeliveriesInput,
-  ): Promise<{ data: Delivery[]; total: number; page: number; limit: number }> {
+  ): Promise<{ data: DeliveryEntity[]; total: number; page: number; limit: number }> {
     const { data, total } = await this.deliveriesRepo.listByStore(storeId, {
       page: input.page,
       limit: input.limit,
-      order: input.order === 'ASC' ? 'asc' : 'desc',
+      order: input.order,
       method: input.method ?? null,
       confirmedByUserId: input.confirmedByUserId ?? null,
       from: input.from ? new Date(input.from) : null,
@@ -343,10 +355,10 @@ export class DeliveriesService {
   }
 
   private enqueueConfirmed(
-    tx: Prisma.TransactionClient,
+    manager: Parameters<typeof this.outbox.enqueue>[0],
     event: ConfirmedEventInput,
   ): Promise<void> {
-    return this.outbox.enqueue(tx, {
+    return this.outbox.enqueue(manager, {
       aggregateId: event.orderId,
       aggregateType: 'Delivery',
       eventType: 'delivery.confirmed',

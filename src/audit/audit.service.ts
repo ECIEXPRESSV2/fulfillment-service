@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { AuditAction, Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import { EntityManager, Repository } from 'typeorm';
+import { AuditLogEntity } from '../database/entities/audit-log.entity';
+import { AuditAction } from '../common/enums';
 
 /** Una entrada de auditoría de una acción sensible (CLAUDE.md §5, RN-12). */
 export interface AuditEntry {
@@ -16,7 +18,7 @@ export interface AuditEntry {
 
 /**
  * Log append-only de acciones sensibles. Para acciones transaccionales se escribe con
- * `record(tx, ...)` dentro de la MISMA transacción del cambio de negocio (atómico). Para
+ * `record(entry, manager)` dentro de la MISMA transacción del cambio de negocio (atómico). Para
  * acciones de solo lectura (validar) se usa `safeRecord`, best-effort: un fallo de auditoría
  * no debe romper la operación.
  */
@@ -24,32 +26,36 @@ export interface AuditEntry {
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @InjectRepository(AuditLogEntity)
+    private readonly repo: Repository<AuditLogEntity>,
+  ) {}
+
+  private r(manager?: EntityManager): Repository<AuditLogEntity> {
+    return manager ? manager.getRepository(AuditLogEntity) : this.repo;
+  }
 
   /** Registra la acción dentro de la transacción de negocio (atómico). */
-  async record(tx: Prisma.TransactionClient, entry: AuditEntry): Promise<void> {
-    await tx.auditLog.create({ data: this.toData(entry) });
-  }
-
-  /** Registra la acción de forma independiente y best-effort: nunca lanza. */
-  async safeRecord(entry: AuditEntry): Promise<void> {
-    try {
-      await this.prisma.auditLog.create({ data: this.toData(entry) });
-    } catch (error) {
-      this.logger.warn({ err: error, action: entry.action }, 'No se pudo registrar auditoría');
-    }
-  }
-
-  private toData(entry: AuditEntry): Prisma.AuditLogCreateInput {
-    return {
+  async record(entry: AuditEntry, manager?: EntityManager): Promise<void> {
+    const entity = this.repo.create({
       action: entry.action,
       actorId: entry.actorId ?? null,
       orderId: entry.orderId ?? null,
       pickupCodeId: entry.pickupCodeId ?? null,
       deliveryId: entry.deliveryId ?? null,
       reason: entry.reason ?? null,
-      metadata: (entry.metadata ?? undefined) as Prisma.InputJsonValue | undefined,
+      metadata: entry.metadata ?? null,
       correlationId: entry.correlationId ?? null,
-    };
+    });
+    await this.r(manager).save(entity);
+  }
+
+  /** Registra la acción de forma independiente y best-effort: nunca lanza. */
+  async safeRecord(entry: AuditEntry): Promise<void> {
+    try {
+      await this.record(entry);
+    } catch (error) {
+      this.logger.warn({ err: error, action: entry.action }, 'No se pudo registrar auditoría');
+    }
   }
 }

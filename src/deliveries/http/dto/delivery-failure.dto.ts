@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { DeliveryFailureReason } from '@prisma/client';
+import { DeliveryFailureReason } from '../../../common/enums';
 import { IsEnum, IsNotEmpty, IsString, MaxLength, ValidateIf } from 'class-validator';
 
 /** Body de UC-06: motivo tipificado de la entrega fallida; `OTHER` exige nota (RN-13). */

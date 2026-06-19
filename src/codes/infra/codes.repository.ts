@@ -100,14 +100,18 @@ export class CodesRepository {
     return result.affected ?? 0;
   }
 
-  /** Invalida el código `ACTIVE` del pedido (UC-08). Idempotente: solo afecta `ACTIVE`. */
+  /**
+   * Invalida el código `ACTIVE` del pedido (UC-08). Idempotente: solo afecta `ACTIVE`.
+   * Devuelve cuántas filas cambiaron (0 si ya no había código activo).
+   */
   async invalidateActiveByOrderId(
     orderId: string,
     manager?: EntityManager,
-  ): Promise<void> {
-    await this.r(manager).update(
+  ): Promise<number> {
+    const result = await this.r(manager).update(
       { orderId, status: PickupCodeStatus.ACTIVE },
       { status: PickupCodeStatus.INVALIDATED },
     );
+    return result.affected ?? 0;
   }
 }

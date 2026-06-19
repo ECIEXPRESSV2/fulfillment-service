@@ -5,9 +5,11 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OutboxStatus, Prisma } from '@prisma/client';
+import { InjectRepository } from '@nestjs/typeorm';
+import { IsNull, LessThanOrEqual, Or, Repository } from 'typeorm';
+import { OutboxEventEntity } from '../database/entities/outbox-event.entity';
+import { OutboxStatus } from '../common/enums';
 import { EnvironmentVariables } from '../config/env.config';
-import { PrismaService } from '../prisma/prisma.service';
 import { RabbitmqService } from './rabbitmq.service';
 
 /** Cuántos eventos pendientes se intentan publicar por tick. */
@@ -27,7 +29,8 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly pollIntervalMs: number;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @InjectRepository(OutboxEventEntity)
+    private readonly repo: Repository<OutboxEventEntity>,
     private readonly rabbitmq: RabbitmqService,
     config: ConfigService<EnvironmentVariables, true>,
   ) {
@@ -39,7 +42,6 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
     this.timer = setInterval(() => {
       void this.drain();
     }, this.pollIntervalMs);
-    // No bloquear el cierre del proceso por el timer.
     this.timer.unref?.();
   }
 
@@ -53,12 +55,12 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
     this.running = true;
     try {
       const now = new Date();
-      const due = await this.prisma.outboxEvent.findMany({
+      const due = await this.repo.find({
         where: {
           status: OutboxStatus.PENDING,
-          OR: [{ nextRetryAt: null }, { nextRetryAt: { lte: now } }],
+          nextRetryAt: Or(IsNull(), LessThanOrEqual(now)),
         },
-        orderBy: { createdAt: 'asc' },
+        order: { createdAt: 'ASC' },
         take: BATCH_SIZE,
       });
 
@@ -72,18 +74,13 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
     }
   }
 
-  private async publishOne(event: {
-    id: string;
-    routingKey: string;
-    payload: Prisma.JsonValue;
-    retryCount: number;
-    idempotencyKey: string;
-  }): Promise<void> {
+  private async publishOne(event: OutboxEventEntity): Promise<void> {
     try {
       await this.rabbitmq.publish(event.routingKey, event.payload);
-      await this.prisma.outboxEvent.update({
-        where: { id: event.id },
-        data: { status: OutboxStatus.PUBLISHED, publishedAt: new Date(), lastError: null },
+      await this.repo.update(event.id, {
+        status: OutboxStatus.PUBLISHED,
+        publishedAt: new Date(),
+        lastError: null,
       });
       this.logger.debug(
         { routingKey: event.routingKey, idempotencyKey: event.idempotencyKey },
@@ -95,7 +92,7 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   private async handleFailure(
-    event: { id: string; routingKey: string; retryCount: number },
+    event: OutboxEventEntity,
     error: unknown,
   ): Promise<void> {
     const retryCount = event.retryCount + 1;
@@ -103,9 +100,10 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
     const exhausted = retryCount >= this.maxRetries;
 
     if (exhausted) {
-      await this.prisma.outboxEvent.update({
-        where: { id: event.id },
-        data: { status: OutboxStatus.FAILED, retryCount, lastError: message },
+      await this.repo.update(event.id, {
+        status: OutboxStatus.FAILED,
+        retryCount,
+        lastError: message,
       });
       this.logger.error(
         { routingKey: event.routingKey, retryCount },
@@ -114,13 +112,9 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
       return;
     }
 
-    // Backoff exponencial: 2^retryCount segundos.
     const delayMs = 2 ** retryCount * 1000;
     const nextRetryAt = new Date(Date.now() + delayMs);
-    await this.prisma.outboxEvent.update({
-      where: { id: event.id },
-      data: { retryCount, lastError: message, nextRetryAt },
-    });
+    await this.repo.update(event.id, { retryCount, lastError: message, nextRetryAt });
     this.logger.warn(
       { routingKey: event.routingKey, retryCount, nextRetryAt },
       'Fallo publicando evento; se reintentará con backoff',

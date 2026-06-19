@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import { EntityManager, QueryFailedError, Repository } from 'typeorm';
+import { ProcessedEventEntity } from '../database/entities/processed-event.entity';
 
-/** Código de Prisma para violación de restricción única (clave ya insertada). */
-const UNIQUE_VIOLATION = 'P2002';
+/** Código PostgreSQL de violación de restricción única. */
+const PG_UNIQUE_VIOLATION = '23505';
 
 /**
  * Idempotencia de consumo (CLAUDE.md §9, §13): deduplica eventos por `idempotencyKey`
@@ -11,36 +12,36 @@ const UNIQUE_VIOLATION = 'P2002';
  */
 @Injectable()
 export class IdempotencyService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @InjectRepository(ProcessedEventEntity)
+    private readonly repo: Repository<ProcessedEventEntity>,
+  ) {}
 
   /** ¿Ya se procesó este evento? */
   async isProcessed(idempotencyKey: string): Promise<boolean> {
-    const row = await this.prisma.processedEvent.findUnique({
-      where: { idempotencyKey },
-    });
+    const row = await this.repo.findOne({ where: { idempotencyKey } });
     return row !== null;
   }
 
   /**
    * Marca el evento como procesado dentro de la MISMA tx que aplicó los efectos.
-   * Si otro consumidor lo insertó en paralelo (violación única), lo trata como ya procesado:
-   * la tx hará rollback y el efecto duplicado se evita.
+   * Si otro consumidor lo insertó en paralelo (violación única), lo trata como ya procesado.
    */
   async markProcessed(
-    tx: Prisma.TransactionClient,
+    manager: EntityManager,
     idempotencyKey: string,
     routingKey: string,
   ): Promise<void> {
-    await tx.processedEvent.create({
-      data: { idempotencyKey, routingKey },
-    });
+    const repo = manager.getRepository(ProcessedEventEntity);
+    const entity = repo.create({ idempotencyKey, routingKey });
+    await repo.save(entity);
   }
 
-  /** True si el error es una violación de unicidad (evento ya marcado como procesado). */
+  /** True si el error es una violación de unicidad PostgreSQL (evento ya marcado como procesado). */
   isDuplicateError(error: unknown): boolean {
     return (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === UNIQUE_VIOLATION
+      error instanceof QueryFailedError &&
+      (error as QueryFailedError & { code: string }).code === PG_UNIQUE_VIOLATION
     );
   }
 }

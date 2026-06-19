@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { DeliveryMethod } from '@prisma/client';
+import { DeliveryMethod } from '../../../common/enums';
 import { Type } from 'class-transformer';
 import {
   IsEnum,

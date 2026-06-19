@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { PickupCodeStatus } from '@prisma/client';
+import { PickupCodeStatus } from '../../../common/enums';
 import { PickupCodeView } from '../../domain/codes.service';
 
 /** Respuesta de UC-02: el código de retiro del pedido para el comprador. */
