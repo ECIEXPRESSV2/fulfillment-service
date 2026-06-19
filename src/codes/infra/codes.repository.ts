@@ -1,73 +1,90 @@
 import { Injectable } from '@nestjs/common';
-import { PickupCode, PickupCodeStatus, Prisma } from '@prisma/client';
-import { PrismaService } from '../../prisma/prisma.service';
+import { InjectRepository } from '@nestjs/typeorm';
+import { EntityManager, LessThanOrEqual, Repository } from 'typeorm';
+import { PickupCodeEntity } from '../../database/entities/pickup-code.entity';
+import { PickupCodeStatus } from '../../common/enums';
 
-/** Datos para persistir un nuevo código de retiro `ACTIVE`. */
-export interface CreatePickupCodeData {
+export type CreatePickupCodeInput = {
   orderId: string;
   buyerId: string;
   storeId: string;
   token: string;
   shortCode: string;
   expiresAt: Date;
-}
+};
 
 /**
- * Acceso a `pickup_codes` vía Prisma. Única capa donde vive Prisma para este dominio
- * (CLAUDE.md §4). Los métodos de escritura aceptan una tx para componer con el outbox.
+ * Acceso a `pickup_codes` vía TypeORM. Única capa donde vive el ORM para este dominio
+ * (CLAUDE.md §4). Los métodos de escritura aceptan un EntityManager para componer con el outbox.
  */
 @Injectable()
 export class CodesRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @InjectRepository(PickupCodeEntity)
+    private readonly repo: Repository<PickupCodeEntity>,
+  ) {}
+
+  private r(manager?: EntityManager): Repository<PickupCodeEntity> {
+    return manager ? manager.getRepository(PickupCodeEntity) : this.repo;
+  }
 
   /** Crea el código (estado `ACTIVE` por defecto del schema) dentro de la tx dada. */
-  create(tx: Prisma.TransactionClient, data: CreatePickupCodeData): Promise<PickupCode> {
-    return tx.pickupCode.create({ data });
+  async create(
+    data: CreatePickupCodeInput,
+    manager?: EntityManager,
+  ): Promise<PickupCodeEntity> {
+    const entity = this.repo.create(data);
+    return this.r(manager).save(entity);
   }
 
   /** Código `ACTIVE` del pedido, si existe (invariante: a lo sumo uno). */
-  findActiveByOrderId(
+  async findActiveByOrderId(
     orderId: string,
-    client: Prisma.TransactionClient | PrismaService = this.prisma,
-  ): Promise<PickupCode | null> {
-    return client.pickupCode.findFirst({
+    manager?: EntityManager,
+  ): Promise<PickupCodeEntity | null> {
+    return this.r(manager).findOne({
       where: { orderId, status: PickupCodeStatus.ACTIVE },
     });
   }
 
   /** Último código del pedido (cualquier estado), para consulta del comprador (UC-02). */
-  findLatestByOrderId(orderId: string): Promise<PickupCode | null> {
-    return this.prisma.pickupCode.findFirst({
+  async findLatestByOrderId(orderId: string): Promise<PickupCodeEntity | null> {
+    return this.repo.findOne({
       where: { orderId },
-      orderBy: { createdAt: 'desc' },
+      order: { createdAt: 'DESC' },
     });
   }
 
   /** Busca exclusivamente por token (el valor que codifica el QR). */
-  findByToken(token: string): Promise<PickupCode | null> {
-    return this.prisma.pickupCode.findUnique({ where: { token } });
+  async findByToken(token: string): Promise<PickupCodeEntity | null> {
+    return this.repo.findOne({ where: { token } });
   }
 
   /** Busca por token (del QR) o por código corto legible. */
-  findByTokenOrShortCode(code: string): Promise<PickupCode | null> {
-    return this.prisma.pickupCode.findFirst({
-      where: { OR: [{ token: code }, { shortCode: code }] },
-    });
+  async findByTokenOrShortCode(code: string): Promise<PickupCodeEntity | null> {
+    return this.repo
+      .createQueryBuilder('pc')
+      .where('pc.token = :code OR pc.short_code = :code', { code })
+      .getOne();
   }
 
   /** Marca un código como `USED` con la hora de uso (confirmación de entrega). */
-  async markUsedById(tx: Prisma.TransactionClient, id: string): Promise<void> {
-    await tx.pickupCode.update({
-      where: { id },
-      data: { status: PickupCodeStatus.USED, usedAt: new Date() },
+  async markUsedById(id: string, manager?: EntityManager): Promise<void> {
+    await this.r(manager).update(id, {
+      status: PickupCodeStatus.USED,
+      usedAt: new Date(),
     });
   }
 
   /** Códigos `ACTIVE` ya vencidos (`expiresAt <= now`), en lotes (UC-07). */
-  findActiveExpired(now: Date, take: number): Promise<PickupCode[]> {
-    return this.prisma.pickupCode.findMany({
-      where: { status: PickupCodeStatus.ACTIVE, expiresAt: { lte: now } },
+  async findActiveExpired(now: Date, take: number): Promise<PickupCodeEntity[]> {
+    return this.repo.find({
+      where: {
+        status: PickupCodeStatus.ACTIVE,
+        expiresAt: LessThanOrEqual(now),
+      },
       take,
+      order: { expiresAt: 'ASC' },
     });
   }
 
@@ -75,23 +92,22 @@ export class CodesRepository {
    * Marca un código como `EXPIRED` **solo si sigue `ACTIVE`** (idempotente y seguro ante
    * carreras con confirmación/cancelación). Devuelve cuántas filas cambiaron (0 o 1).
    */
-  async markExpiredIfActive(tx: Prisma.TransactionClient, id: string): Promise<number> {
-    const { count } = await tx.pickupCode.updateMany({
-      where: { id, status: PickupCodeStatus.ACTIVE },
-      data: { status: PickupCodeStatus.EXPIRED },
-    });
-    return count;
+  async markExpiredIfActive(id: string, manager?: EntityManager): Promise<number> {
+    const result = await this.r(manager).update(
+      { id, status: PickupCodeStatus.ACTIVE },
+      { status: PickupCodeStatus.EXPIRED },
+    );
+    return result.affected ?? 0;
   }
 
   /** Invalida el código `ACTIVE` del pedido (UC-08). Idempotente: solo afecta `ACTIVE`. */
   async invalidateActiveByOrderId(
-    tx: Prisma.TransactionClient,
     orderId: string,
-  ): Promise<number> {
-    const { count } = await tx.pickupCode.updateMany({
-      where: { orderId, status: PickupCodeStatus.ACTIVE },
-      data: { status: PickupCodeStatus.INVALIDATED },
-    });
-    return count;
+    manager?: EntityManager,
+  ): Promise<void> {
+    await this.r(manager).update(
+      { orderId, status: PickupCodeStatus.ACTIVE },
+      { status: PickupCodeStatus.INVALIDATED },
+    );
   }
 }
