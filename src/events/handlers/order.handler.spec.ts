@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { AuditService } from '../../audit/audit.service';
 import { CodesService } from '../../codes/domain/codes.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { IdempotencyService } from '../idempotency.service';
@@ -18,7 +19,7 @@ function build() {
 
   const codesService = {
     generateForOrder: jest.fn().mockResolvedValue({ created: true }),
-    invalidateByOrder: jest.fn().mockResolvedValue({ invalidated: true }),
+    invalidateByOrder: jest.fn().mockResolvedValue({ invalidated: true, alreadyDelivered: false }),
   } as unknown as jest.Mocked<CodesService>;
 
   const idempotency = {
@@ -27,8 +28,10 @@ function build() {
     isDuplicateError: jest.fn().mockReturnValue(false),
   } as unknown as jest.Mocked<IdempotencyService>;
 
-  const handler = new OrderHandler(prisma, orderProjection, codesService, idempotency);
-  return { handler, orderProjection, codesService, idempotency };
+  const audit = { record: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<AuditService>;
+
+  const handler = new OrderHandler(prisma, orderProjection, codesService, idempotency, audit);
+  return { handler, orderProjection, codesService, idempotency, audit };
 }
 
 describe('OrderHandler', () => {
@@ -55,12 +58,34 @@ describe('OrderHandler', () => {
   });
 
   it('cancelled: marca cancelado e invalida el código (UC-08)', async () => {
-    const { handler, orderProjection, codesService } = build();
+    const { handler, orderProjection, codesService, audit } = build();
 
     await handler.handle(ORDER_ROUTING_KEYS.cancelled, { orderId: 'ord-1', idempotencyKey: 'idem-2' });
 
     expect(orderProjection.markCancelled).toHaveBeenCalledWith('ord-1', expect.anything());
     expect(codesService.invalidateByOrder).toHaveBeenCalledWith(expect.anything(), 'ord-1');
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: 'CODE_INVALIDATED', orderId: 'ord-1' }),
+    );
+  });
+
+  it('cancelled tras entrega: audita la inconsistencia y no falla (RN-15)', async () => {
+    const { handler, codesService, audit } = build();
+    (codesService.invalidateByOrder as jest.Mock).mockResolvedValue({
+      invalidated: false,
+      alreadyDelivered: true,
+    });
+
+    await handler.handle(ORDER_ROUTING_KEYS.cancelled, { orderId: 'ord-1', idempotencyKey: 'idem-9' });
+
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: 'CODE_INVALIDATED',
+        metadata: { inconsistency: 'cancelled_after_delivery' },
+      }),
+    );
   });
 
   it('no reprocesa un evento ya procesado', async () => {

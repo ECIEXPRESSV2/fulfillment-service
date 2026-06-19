@@ -1,6 +1,7 @@
 import { Delivery, DeliveryFailureReason, DeliveryMethod, PickupCode, PickupCodeStatus, Prisma } from '@prisma/client';
 import { CodesService } from '../codes/domain/codes.service';
 import { ValidationError } from '../codes/domain/pickup-code.types';
+import { AuditService } from '../audit/audit.service';
 import { CodesRepository } from '../codes/infra/codes.repository';
 import { OrderProjectionService } from '../events/projections/order-projection.service';
 import { StoreStaffProjectionService } from '../events/projections/store-staff-projection.service';
@@ -75,6 +76,8 @@ function build() {
 
   const outbox = { enqueue: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<OutboxService>;
 
+  const audit = { record: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<AuditService>;
+
   const service = new DeliveriesService(
     prisma,
     codesService,
@@ -83,8 +86,9 @@ function build() {
     orderProjection,
     storeStaff,
     outbox,
+    audit,
   );
-  return { service, codesService, codesRepo, deliveriesRepo, orderProjection, storeStaff, outbox };
+  return { service, codesService, codesRepo, deliveriesRepo, orderProjection, storeStaff, outbox, audit };
 }
 
 describe('DeliveriesService', () => {

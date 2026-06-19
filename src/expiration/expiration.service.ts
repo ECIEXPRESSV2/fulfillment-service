@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { AuditAction } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { CodesRepository } from '../codes/infra/codes.repository';
 import { OutboxService } from '../outbox/outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -19,6 +21,7 @@ export class ExpirationService {
     private readonly prisma: PrismaService,
     private readonly codesRepo: CodesRepository,
     private readonly outbox: OutboxService,
+    private readonly audit: AuditService,
   ) {}
 
   /** Expira los códigos vencidos. Devuelve cuántos se expiraron efectivamente. */
@@ -39,6 +42,11 @@ export class ExpirationService {
           eventType: 'qr.expired',
           routingKey: 'fulfillment.qr.expired',
           business: { orderId: code.orderId, buyerId: code.buyerId },
+        });
+        await this.audit.record(tx, {
+          action: AuditAction.CODE_EXPIRED,
+          orderId: code.orderId,
+          pickupCodeId: code.id,
         });
         return true;
       });

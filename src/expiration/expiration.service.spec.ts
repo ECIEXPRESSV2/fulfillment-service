@@ -1,4 +1,5 @@
 import { PickupCode, PickupCodeStatus, Prisma } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { CodesRepository } from '../codes/infra/codes.repository';
 import { OutboxService } from '../outbox/outbox.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -34,8 +35,9 @@ function build() {
   } as unknown as jest.Mocked<CodesRepository>;
 
   const outbox = { enqueue: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<OutboxService>;
+  const audit = { record: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<AuditService>;
 
-  const service = new ExpirationService(prisma, codesRepo, outbox);
+  const service = new ExpirationService(prisma, codesRepo, outbox, audit);
   return { service, codesRepo, outbox };
 }
 

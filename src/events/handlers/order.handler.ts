@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AuditAction, Prisma } from '@prisma/client';
+import { AuditService } from '../../audit/audit.service';
 import { CodesService } from '../../codes/domain/codes.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { IdempotencyService } from '../idempotency.service';
@@ -27,6 +28,7 @@ export class OrderHandler {
     private readonly orderProjection: OrderProjectionService,
     private readonly codesService: CodesService,
     private readonly idempotency: IdempotencyService,
+    private readonly audit: AuditService,
   ) {}
 
   async handle(routingKey: string, event: EventRecord): Promise<void> {
@@ -90,11 +92,24 @@ export class OrderHandler {
     }
 
     await this.orderProjection.markCancelled(orderId, tx);
-    const { invalidated } = await this.codesService.invalidateByOrder(tx, orderId);
-    if (!invalidated) {
-      // El código no estaba ACTIVE (ya usado/expirado/inexistente). Si ya fue entregado, no se
-      // revierte (RN-15); la inconsistencia se registrará en auditoría al integrar ese módulo.
-      this.logger.debug({ orderId }, 'Cancelación sin código ACTIVE que invalidar');
+    const { invalidated, alreadyDelivered } = await this.codesService.invalidateByOrder(tx, orderId);
+    const correlationId = this.str(event.correlationId);
+
+    if (invalidated) {
+      await this.audit.record(tx, {
+        action: AuditAction.CODE_INVALIDATED,
+        orderId,
+        correlationId,
+      });
+    } else if (alreadyDelivered) {
+      // RN-15: el pedido ya se entregó; la cancelación no se revierte, se deja la inconsistencia.
+      await this.audit.record(tx, {
+        action: AuditAction.CODE_INVALIDATED,
+        orderId,
+        reason: 'Cancelación recibida tras la entrega; no se revierte.',
+        metadata: { inconsistency: 'cancelled_after_delivery' },
+        correlationId,
+      });
     }
   }
 

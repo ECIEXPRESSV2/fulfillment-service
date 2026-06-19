@@ -6,12 +6,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AuditAction,
   Delivery,
   DeliveryFailureReason,
   DeliveryMethod,
   PickupCodeStatus,
   Prisma,
 } from '@prisma/client';
+import { AuditService } from '../../audit/audit.service';
 import { CodesService } from '../../codes/domain/codes.service';
 import { ValidationError } from '../../codes/domain/pickup-code.types';
 import { CodesRepository } from '../../codes/infra/codes.repository';
@@ -74,6 +76,7 @@ export class DeliveriesService {
     private readonly orderProjection: OrderProjectionService,
     private readonly storeStaff: StoreStaffProjectionService,
     private readonly outbox: OutboxService,
+    private readonly audit: AuditService,
   ) {}
 
   /**
@@ -139,7 +142,14 @@ export class DeliveriesService {
         deliveredAt: delivery.deliveredAt,
         correlationId,
       });
-      // Auditoría DELIVERY_CONFIRMED: se añade al integrar el módulo de auditoría.
+      await this.audit.record(tx, {
+        action: AuditAction.DELIVERY_CONFIRMED,
+        actorId: sellerUserId,
+        orderId: found.orderId,
+        deliveryId: delivery.id,
+        metadata: { method: DeliveryMethod.QR },
+        correlationId,
+      });
       return delivery;
     });
   }
@@ -189,7 +199,14 @@ export class DeliveriesService {
         deliveredAt: delivery.deliveredAt,
         correlationId,
       });
-      // Auditoría MANUAL_DELIVERY: se añade al integrar el módulo de auditoría.
+      await this.audit.record(tx, {
+        action: AuditAction.MANUAL_DELIVERY,
+        actorId: sellerUserId,
+        orderId,
+        deliveryId: delivery.id,
+        reason: input.reason,
+        correlationId,
+      });
       return delivery;
     });
   }
@@ -235,7 +252,15 @@ export class DeliveriesService {
         business: { orderId, buyerId: projection.buyerId, reason: input.reason },
         correlationId,
       });
-      // Auditoría DELIVERY_FAILED: se añade al integrar el módulo de auditoría.
+      await this.audit.record(tx, {
+        action: AuditAction.DELIVERY_FAILED,
+        actorId: sellerUserId,
+        orderId,
+        deliveryId: delivery.id,
+        reason: input.note ?? undefined,
+        metadata: { failureReason: input.reason },
+        correlationId,
+      });
       return delivery;
     });
   }

@@ -6,7 +6,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PickupCode, PickupCodeStatus, Prisma } from '@prisma/client';
+import { AuditAction, PickupCode, PickupCodeStatus, Prisma } from '@prisma/client';
+import { AuditService } from '../../audit/audit.service';
 import { EnvironmentVariables } from '../../config/env.config';
 import { StoreStaffProjectionService } from '../../events/projections/store-staff-projection.service';
 import { OutboxService } from '../../outbox/outbox.service';
@@ -52,6 +53,7 @@ export class CodesService {
     private readonly outbox: OutboxService,
     private readonly storeStaff: StoreStaffProjectionService,
     private readonly rateLimiter: ShortCodeRateLimiter,
+    private readonly audit: AuditService,
     config: ConfigService<EnvironmentVariables, true>,
   ) {
     this.fallbackExpiryHours = config.get('PICKUP_CODE_FALLBACK_EXPIRY_HOURS', { infer: true });
@@ -100,6 +102,13 @@ export class CodesService {
       correlationId: input.correlationId,
     });
 
+    await this.audit.record(tx, {
+      action: AuditAction.CODE_GENERATED,
+      orderId: input.orderId,
+      pickupCodeId: code.id,
+      correlationId: input.correlationId,
+    });
+
     return { created: true, code };
   }
 
@@ -110,18 +119,29 @@ export class CodesService {
    */
   async validateCode(code: string, sellerUserId: string): Promise<ValidationResult> {
     const { code: found, error } = await this.resolveForValidation(code, sellerUserId);
-    if (error !== null || found === null) {
-      return { valid: false, validationError: error ?? ValidationError.CODE_NOT_FOUND };
-    }
-    return {
-      valid: true,
-      order: {
-        orderId: found.orderId,
-        buyerId: found.buyerId,
-        storeId: found.storeId,
-        expiresAt: found.expiresAt,
-      },
-    };
+    const result: ValidationResult =
+      error !== null || found === null
+        ? { valid: false, validationError: error ?? ValidationError.CODE_NOT_FOUND }
+        : {
+            valid: true,
+            order: {
+              orderId: found.orderId,
+              buyerId: found.buyerId,
+              storeId: found.storeId,
+              expiresAt: found.expiresAt,
+            },
+          };
+
+    // Auditoría best-effort (validar es solo lectura, RN-03): no debe romper la respuesta.
+    await this.audit.safeRecord({
+      action: AuditAction.CODE_VALIDATED,
+      actorId: sellerUserId,
+      orderId: found?.orderId,
+      pickupCodeId: found?.id,
+      metadata: { valid: result.valid, validationError: result.valid ? null : result.validationError },
+    });
+
+    return result;
   }
 
   /**
@@ -200,9 +220,15 @@ export class CodesService {
   async invalidateByOrder(
     tx: Prisma.TransactionClient,
     orderId: string,
-  ): Promise<{ invalidated: boolean }> {
+  ): Promise<{ invalidated: boolean; alreadyDelivered: boolean }> {
     const count = await this.repo.invalidateActiveByOrderId(tx, orderId);
-    return { invalidated: count > 0 };
+    if (count > 0) {
+      return { invalidated: true, alreadyDelivered: false };
+    }
+    // No había código ACTIVE. Si el último ya estaba USED, el pedido se entregó: la
+    // cancelación llega tarde y no se revierte (RN-15); el handler lo audita.
+    const latest = await this.repo.findLatestByOrderId(orderId);
+    return { invalidated: false, alreadyDelivered: latest?.status === PickupCodeStatus.USED };
   }
 
   /** Devuelve el primer error de estado del código, o `null` si es válido. */

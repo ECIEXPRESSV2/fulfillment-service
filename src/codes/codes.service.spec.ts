@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { PickupCode, PickupCodeStatus, Prisma } from '@prisma/client';
+import { AuditService } from '../audit/audit.service';
 import { StoreStaffProjectionService } from '../events/projections/store-staff-projection.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { CodesService } from './domain/codes.service';
@@ -40,12 +41,16 @@ function build() {
   const outbox = { enqueue: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<OutboxService>;
   const storeStaff = { isAuthorized: jest.fn().mockResolvedValue(true) } as unknown as jest.Mocked<StoreStaffProjectionService>;
   const rateLimiter = { consume: jest.fn().mockReturnValue(true) } as unknown as jest.Mocked<ShortCodeRateLimiter>;
+  const audit = {
+    record: jest.fn().mockResolvedValue(undefined),
+    safeRecord: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<AuditService>;
   const config = {
     get: (key: string) => (key === 'PICKUP_CODE_FALLBACK_EXPIRY_HOURS' ? FALLBACK_HOURS : BASE_URL),
   } as unknown as ConfigService;
 
-  const service = new CodesService(repo, outbox, storeStaff, rateLimiter, config);
-  return { service, repo, outbox, storeStaff, rateLimiter };
+  const service = new CodesService(repo, outbox, storeStaff, rateLimiter, audit, config);
+  return { service, repo, outbox, storeStaff, rateLimiter, audit };
 }
 
 describe('CodesService', () => {
@@ -209,13 +214,30 @@ describe('CodesService', () => {
     it('invalidated:true cuando había un código ACTIVE', async () => {
       const { service, repo } = build();
       repo.invalidateActiveByOrderId.mockResolvedValue(1);
-      expect(await service.invalidateByOrder(tx, 'ord-1')).toEqual({ invalidated: true });
+      expect(await service.invalidateByOrder(tx, 'ord-1')).toEqual({
+        invalidated: true,
+        alreadyDelivered: false,
+      });
     });
 
     it('invalidated:false cuando no había código ACTIVE (idempotente)', async () => {
       const { service, repo } = build();
       repo.invalidateActiveByOrderId.mockResolvedValue(0);
-      expect(await service.invalidateByOrder(tx, 'ord-1')).toEqual({ invalidated: false });
+      repo.findLatestByOrderId.mockResolvedValue(null);
+      expect(await service.invalidateByOrder(tx, 'ord-1')).toEqual({
+        invalidated: false,
+        alreadyDelivered: false,
+      });
+    });
+
+    it('alreadyDelivered:true cuando el código ya estaba USED (cancelación tardía, RN-15)', async () => {
+      const { service, repo } = build();
+      repo.invalidateActiveByOrderId.mockResolvedValue(0);
+      repo.findLatestByOrderId.mockResolvedValue(buildCode({ status: PickupCodeStatus.USED }));
+      expect(await service.invalidateByOrder(tx, 'ord-1')).toEqual({
+        invalidated: false,
+        alreadyDelivered: true,
+      });
     });
   });
 });

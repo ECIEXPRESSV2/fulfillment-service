@@ -12,6 +12,7 @@ import {
 } from './common/interceptors/correlation-id.interceptor';
 import { GatewayAuthGuard } from './common/guards/gateway-auth.guard';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { AuditModule } from './audit/audit.module';
 import { CodesModule } from './codes/codes.module';
 import { DeliveriesModule } from './deliveries/deliveries.module';
 import { ConsumerModule } from './events/consumer.module';
@@ -47,6 +48,7 @@ import { QrModule } from './qr/qr.module';
       },
     }),
     PrismaModule,
+    AuditModule,
     OutboxModule,
     EventsModule,
     CodesModule,
