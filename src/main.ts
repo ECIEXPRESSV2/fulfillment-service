@@ -78,7 +78,9 @@ process.on('SIGINT', () => {
 });
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  // `cors: true` permite que el frontend (otro origen, ej. Vite en :5173) llame al servicio.
+  // Igual que orders-service; en producción el API Gateway controla el origen real.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, cors: true });
 
   // Logger estructurado (Pino) para toda la app.
   app.useLogger(app.get(Logger));
