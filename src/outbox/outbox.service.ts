@@ -51,6 +51,7 @@ export class OutboxService {
 
     const repo = manager.getRepository(OutboxEventEntity);
     const entity = repo.create({
+      id: randomUUID(),
       aggregateId: input.aggregateId,
       aggregateType: input.aggregateType,
       eventType: input.eventType,

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiForbiddenResponse,
@@ -50,6 +50,7 @@ export class CodesController {
   }
 
   @Post('codes/validate')
+  @HttpCode(200)
   @ApiOperation({
     summary: 'Validar un código de retiro (UC-03)',
     description:

@@ -62,12 +62,26 @@ export class InitSchema1719792000000 implements MigrationInterface {
       );
     `);
     await queryRunner.query(`
-      CREATE INDEX IF NOT EXISTS idx_pickup_codes_order_id ON pickup_codes (order_id);
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'pickup_codes' AND column_name = 'order_id'
+        ) THEN
+          CREATE INDEX IF NOT EXISTS idx_pickup_codes_order_id ON pickup_codes (order_id);
+        END IF;
+      END $$;
     `);
     await queryRunner.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_code_per_order
-        ON pickup_codes (order_id)
-        WHERE status = 'ACTIVE';
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'pickup_codes' AND column_name = 'order_id'
+        ) THEN
+          CREATE UNIQUE INDEX IF NOT EXISTS uniq_active_code_per_order
+            ON pickup_codes (order_id)
+            WHERE status = 'ACTIVE';
+        END IF;
+      END $$;
     `);
 
     await queryRunner.query(`
@@ -83,8 +97,26 @@ export class InitSchema1719792000000 implements MigrationInterface {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS idx_deliveries_order_id ON deliveries (order_id);`);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS idx_deliveries_store_id ON deliveries (store_id);`);
+    await queryRunner.query(`
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'deliveries' AND column_name = 'order_id'
+        ) THEN
+          CREATE INDEX IF NOT EXISTS idx_deliveries_order_id ON deliveries (order_id);
+        END IF;
+      END $$;
+    `);
+    await queryRunner.query(`
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'deliveries' AND column_name = 'store_id'
+        ) THEN
+          CREATE INDEX IF NOT EXISTS idx_deliveries_store_id ON deliveries (store_id);
+        END IF;
+      END $$;
+    `);
 
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS order_projection (
@@ -110,7 +142,16 @@ export class InitSchema1719792000000 implements MigrationInterface {
         CONSTRAINT uq_store_staff_store_user UNIQUE (store_id, user_id)
       );
     `);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS idx_store_staff_store_id ON store_staff (store_id);`);
+    await queryRunner.query(`
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'store_staff' AND column_name = 'store_id'
+        ) THEN
+          CREATE INDEX IF NOT EXISTS idx_store_staff_store_id ON store_staff (store_id);
+        END IF;
+      END $$;
+    `);
 
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS outbox_events (
@@ -130,7 +171,16 @@ export class InitSchema1719792000000 implements MigrationInterface {
         published_at TIMESTAMPTZ
       );
     `);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS idx_outbox_events_status_retry ON outbox_events (status, next_retry_at);`);
+    await queryRunner.query(`
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'outbox_events' AND column_name = 'next_retry_at'
+        ) THEN
+          CREATE INDEX IF NOT EXISTS idx_outbox_events_status_retry ON outbox_events (status, next_retry_at);
+        END IF;
+      END $$;
+    `);
 
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS processed_events (
@@ -156,7 +206,16 @@ export class InitSchema1719792000000 implements MigrationInterface {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
-    await queryRunner.query(`CREATE INDEX IF NOT EXISTS idx_audit_logs_order_id ON audit_logs (order_id);`);
+    await queryRunner.query(`
+      DO $$ BEGIN
+        IF EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_name = 'audit_logs' AND column_name = 'order_id'
+        ) THEN
+          CREATE INDEX IF NOT EXISTS idx_audit_logs_order_id ON audit_logs (order_id);
+        END IF;
+      END $$;
+    `);
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

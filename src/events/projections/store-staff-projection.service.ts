@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'node:crypto';
 import { EntityManager, Repository } from 'typeorm';
 import { StoreStaffProjectionEntity } from '../../database/entities/store-staff-projection.entity';
 import { StoreStaffRole } from '../../common/enums';
@@ -27,7 +28,7 @@ export class StoreStaffProjectionService {
     manager?: EntityManager,
   ): Promise<void> {
     await this.r(manager).upsert(
-      { storeId, userId: ownerId, role: StoreStaffRole.OWNER, isActive: true },
+      { id: randomUUID(), storeId, userId: ownerId, role: StoreStaffRole.OWNER, isActive: true, updatedAt: new Date() },
       { conflictPaths: ['storeId', 'userId'], skipUpdateIfNoValuesChanged: false },
     );
   }
@@ -39,7 +40,7 @@ export class StoreStaffProjectionService {
     manager?: EntityManager,
   ): Promise<void> {
     await this.r(manager).upsert(
-      { storeId, userId, role: StoreStaffRole.STAFF, isActive: true },
+      { id: randomUUID(), storeId, userId, role: StoreStaffRole.STAFF, isActive: true, updatedAt: new Date() },
       { conflictPaths: ['storeId', 'userId'], skipUpdateIfNoValuesChanged: false },
     );
   }

@@ -98,10 +98,6 @@ export class DeliveriesService {
       });
     }
     if (error === ValidationError.CODE_ALREADY_USED) {
-      const existing = await this.deliveriesRepo.findSuccessfulByOrderId(found.orderId);
-      if (existing) {
-        return existing; // idempotente
-      }
       throw new ConflictException({
         code: 'CODE_ALREADY_USED',
         message: 'Este código de retiro ya fue utilizado.',

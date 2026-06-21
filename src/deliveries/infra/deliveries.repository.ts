@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'node:crypto';
 import {
   Between,
   EntityManager,
@@ -49,7 +50,7 @@ export class DeliveriesRepository {
     data: CreateDeliveryInput,
     manager?: EntityManager,
   ): Promise<DeliveryEntity> {
-    const entity = this.repo.create(data as Partial<DeliveryEntity>);
+    const entity = this.repo.create({ ...(data as Partial<DeliveryEntity>), id: randomUUID() });
     return this.r(manager).save(entity);
   }
 

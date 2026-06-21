@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'node:crypto';
 import { EntityManager, Repository } from 'typeorm';
 import { AuditLogEntity } from '../database/entities/audit-log.entity';
 import { AuditAction } from '../common/enums';
@@ -38,6 +39,7 @@ export class AuditService {
   /** Registra la acción dentro de la transacción de negocio (atómico). */
   async record(entry: AuditEntry, manager?: EntityManager): Promise<void> {
     const entity = this.repo.create({
+      id: randomUUID(),
       action: entry.action,
       actorId: entry.actorId ?? null,
       orderId: entry.orderId ?? null,

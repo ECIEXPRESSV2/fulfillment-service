@@ -1,8 +1,7 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
-  ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiHeader,
   ApiNotFoundResponse,
@@ -38,6 +37,7 @@ export class DeliveriesController {
   constructor(private readonly deliveriesService: DeliveriesService) {}
 
   @Post('codes/confirm')
+  @HttpCode(200)
   @ApiOperation({
     summary: 'Confirmar la entrega por QR (UC-04)',
     description:
@@ -46,7 +46,7 @@ export class DeliveriesController {
       'entrega y publica `delivery.confirmed`. Es idempotente: confirmar dos veces el mismo ' +
       'código no crea una segunda entrega.',
   })
-  @ApiCreatedResponse({ description: 'Entrega confirmada.', type: DeliveryResponseDto })
+  @ApiOkResponse({ description: 'Entrega confirmada.', type: DeliveryResponseDto })
   @ApiBadRequestResponse({ description: 'El body no cumple el formato esperado.' })
   @ApiUnauthorizedResponse({ description: 'Falta el header de sesión del gateway.' })
   @ApiForbiddenResponse({ description: 'El código no pertenece a la tienda del vendedor.' })
@@ -62,6 +62,7 @@ export class DeliveriesController {
   }
 
   @Post('orders/:orderId/manual-delivery')
+  @HttpCode(200)
   @UseGuards(StoreAccessGuard)
   @ApiOperation({
     summary: 'Registrar una entrega manual (UC-05)',
@@ -71,7 +72,7 @@ export class DeliveriesController {
       'código como usado si existe y publica `delivery.confirmed` con `method: MANUAL`.',
   })
   @ApiParam({ name: 'orderId', description: 'Id del pedido.', example: 'ord_123' })
-  @ApiCreatedResponse({ description: 'Entrega manual registrada.', type: DeliveryResponseDto })
+  @ApiOkResponse({ description: 'Entrega manual registrada.', type: DeliveryResponseDto })
   @ApiBadRequestResponse({ description: 'Falta el motivo u otro campo inválido.' })
   @ApiUnauthorizedResponse({ description: 'Falta el header de sesión del gateway.' })
   @ApiForbiddenResponse({ description: 'El usuario no tiene acceso a la tienda del pedido.' })
@@ -92,6 +93,7 @@ export class DeliveriesController {
   }
 
   @Post('orders/:orderId/delivery-failure')
+  @HttpCode(200)
   @UseGuards(StoreAccessGuard)
   @ApiOperation({
     summary: 'Registrar una entrega fallida (UC-06)',
@@ -101,7 +103,7 @@ export class DeliveriesController {
       '`delivery.failed`. No marca el código como usado.',
   })
   @ApiParam({ name: 'orderId', description: 'Id del pedido.', example: 'ord_123' })
-  @ApiCreatedResponse({ description: 'Entrega fallida registrada.', type: DeliveryResponseDto })
+  @ApiOkResponse({ description: 'Entrega fallida registrada.', type: DeliveryResponseDto })
   @ApiBadRequestResponse({ description: 'Motivo inválido o falta la nota cuando es OTHER.' })
   @ApiUnauthorizedResponse({ description: 'Falta el header de sesión del gateway.' })
   @ApiForbiddenResponse({ description: 'El usuario no tiene acceso a la tienda del pedido.' })

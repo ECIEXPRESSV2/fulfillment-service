@@ -39,6 +39,7 @@ export class OrderProjectionService {
         storeId: input.storeId,
         pickupExpiresAt: input.pickupExpiresAt ?? null,
         status: input.status ?? 'confirmed',
+        updatedAt: new Date(),
       },
       { conflictPaths: ['orderId'], skipUpdateIfNoValuesChanged: false },
     );

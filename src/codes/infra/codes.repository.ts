@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomUUID } from 'node:crypto';
 import { EntityManager, LessThanOrEqual, Repository } from 'typeorm';
 import { PickupCodeEntity } from '../../database/entities/pickup-code.entity';
 import { PickupCodeStatus } from '../../common/enums';
@@ -33,7 +34,8 @@ export class CodesRepository {
     data: CreatePickupCodeInput,
     manager?: EntityManager,
   ): Promise<PickupCodeEntity> {
-    const entity = this.repo.create(data);
+    const now = new Date();
+    const entity = this.repo.create({ ...data, id: randomUUID(), updatedAt: now });
     return this.r(manager).save(entity);
   }
 
