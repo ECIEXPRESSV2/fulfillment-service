@@ -1,5 +1,7 @@
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { execSync, exec } from 'child_process';
 import * as fs from 'fs';
@@ -76,12 +78,60 @@ process.on('SIGINT', () => {
 });
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // `cors: true` permite que el frontend (otro origen, ej. Vite en :5173) llame al servicio.
+  // Igual que orders-service; en producción el API Gateway controla el origen real.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true, cors: true });
+
+  // Logger estructurado (Pino) para toda la app.
+  app.useLogger(app.get(Logger));
+
+  // Prefijo global /api/v1; `/` y `/health` quedan fuera (CLAUDE.md §7).
+  app.setGlobalPrefix('api/v1', {
+    exclude: [
+      { path: '', method: RequestMethod.GET },
+      { path: 'health', method: RequestMethod.GET },
+      // Imagen pública del QR: vive en /fulfillment/qr/:file, fuera de /api/v1 (CLAUDE.md §7).
+      { path: 'fulfillment/qr/:file', method: RequestMethod.GET },
+    ],
+  });
+
+  // Validación global de DTOs (class-validator/class-transformer).
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
+    }),
+  );
 
   const config = new DocumentBuilder()
-    .setTitle('Fulfillment Service')
-    .setDescription('Fulfillment Service API documentation')
+    .setTitle('Fulfillment Service — ECIxpress')
+    .setDescription(
+      'Microservicio de logística y entrega: genera y valida códigos de retiro (QR), ' +
+        'confirma entregas y publica los eventos que disparan pago (Financial) y ' +
+        'notificaciones (Notification).\n\n' +
+        'Autenticación: Fulfillment confía en los headers que inyecta el API Gateway. ' +
+        'Usa el header `x-user-id` (y `x-user-role` / `x-user-store`) para simular peticiones.',
+    )
     .setVersion('1.0')
+    .addApiKey(
+      { type: 'apiKey', in: 'header', name: 'x-user-id' },
+      'x-user-id',
+    )
+    .addApiKey(
+      { type: 'apiKey', in: 'header', name: 'x-user-role' },
+      'x-user-role',
+    )
+    .addApiKey(
+      { type: 'apiKey', in: 'header', name: 'x-user-store' },
+      'x-user-store',
+    )
+    .addTag('Sistema', 'Raíz y healthcheck del servicio.')
+    .addTag('Códigos de retiro', 'Generación, consulta, validación y confirmación de códigos.')
+    .addTag('Entregas', 'Confirmación, entrega manual, fallida e historial por tienda.')
+    .addTag('QR', 'Imagen pública del código QR de retiro.')
+    .addTag('Estado de fulfillment', 'Estado del proceso de retiro por pedido.')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
