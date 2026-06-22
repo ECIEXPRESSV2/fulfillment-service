@@ -138,7 +138,9 @@ async function bootstrap() {
   SwaggerModule.setup('api', app, document);
 
   const port = process.env.PORT ?? 3000;
-  await app.listen(port);
+  // Enlazar a 0.0.0.0 (no loopback) para que el detector de puertos de Render/contenedores
+  // pueda alcanzar el servicio por la interfaz de red del contenedor.
+  await app.listen(port, '0.0.0.0');
 
   openSwaggerIfBrowserOpen(`http://localhost:${port}/api`);
 }
