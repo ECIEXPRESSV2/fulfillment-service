@@ -113,7 +113,8 @@ describe('DeliveriesService', () => {
           business: expect.objectContaining({ method: DeliveryMethod.QR, buyerId: 'buyer-1' }),
         }),
       );
-      expect(result.id).toBe('dlv-1');
+      expect(result.delivery.id).toBe('dlv-1');
+      expect(result.alreadyDelivered).toBe(false);
     });
 
     it('es idempotente: código ya USED con entrega existente la devuelve sin duplicar', async () => {
@@ -126,9 +127,23 @@ describe('DeliveriesService', () => {
 
       const result = await service.confirmByCode('tok', 'seller-1');
 
-      expect(result.id).toBe('dlv-prev');
+      expect(result.delivery.id).toBe('dlv-prev');
+      expect(result.alreadyDelivered).toBe(true);
       expect(deliveriesRepo.create).not.toHaveBeenCalled();
       expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('lanza 409 si el código está USED pero no hay entrega registrada (inconsistencia)', async () => {
+      const { service, codesService, deliveriesRepo } = build();
+      codesService.resolveForValidation.mockResolvedValue({
+        code: buildCode({ status: PickupCodeStatus.USED }),
+        error: ValidationError.CODE_ALREADY_USED,
+      });
+      deliveriesRepo.findSuccessfulByOrderId.mockResolvedValue(null);
+
+      await expect(service.confirmByCode('tok', 'seller-1')).rejects.toMatchObject({
+        response: { code: 'CODE_ALREADY_USED' },
+      });
     });
 
     it('rechaza con 404 si el código no existe', async () => {
@@ -176,7 +191,23 @@ describe('DeliveriesService', () => {
         tx,
         expect.objectContaining({ business: expect.objectContaining({ method: DeliveryMethod.MANUAL }) }),
       );
-      expect(result.method).toBe(DeliveryMethod.MANUAL);
+      expect(result.delivery.method).toBe(DeliveryMethod.MANUAL);
+      expect(result.alreadyDelivered).toBe(false);
+    });
+
+    it('es idempotente: si ya hay entrega la devuelve sin duplicar', async () => {
+      const { service, orderProjection, deliveriesRepo, outbox } = build();
+      orderProjection.getByOrderId.mockResolvedValue({
+        orderId: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'CONFIRMED', createdAt: new Date(), updatedAt: new Date(),
+      });
+      deliveriesRepo.findSuccessfulByOrderId.mockResolvedValue(buildDelivery({ id: 'dlv-prev' }));
+
+      const result = await service.registerManualDelivery('ord-1', 'seller-1', { reason: 'x' });
+
+      expect(result.delivery.id).toBe('dlv-prev');
+      expect(result.alreadyDelivered).toBe(true);
+      expect(deliveriesRepo.create).not.toHaveBeenCalled();
+      expect(outbox.enqueue).not.toHaveBeenCalled();
     });
 
     it('404 si el pedido no existe en la proyección', async () => {
