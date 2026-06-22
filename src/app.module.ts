@@ -22,6 +22,16 @@ import { ExpirationModule } from './expiration/expiration.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { QrModule } from './qr/qr.module';
 
+/** Indica si `pino-pretty` está instalado y se puede usar como transporte. */
+function isPrettyAvailable(): boolean {
+  try {
+    require.resolve('pino-pretty');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -39,10 +49,12 @@ import { QrModule } from './qr/qr.module';
         },
         customProps: (req) => ({ correlationId: (req as { id?: string }).id }),
         level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+        // pino-pretty es devDependency: solo se usa si está instalado y no estamos en
+        // producción. En la imagen de producción se omite y se loguea JSON estructurado.
         transport:
-          process.env.NODE_ENV === 'production'
-            ? undefined
-            : { target: 'pino-pretty', options: { singleLine: true } },
+          process.env.NODE_ENV !== 'production' && isPrettyAvailable()
+            ? { target: 'pino-pretty', options: { singleLine: true } }
+            : undefined,
         // No loguear PII más allá de ids (CLAUDE.md §13).
         redact: ['req.headers.authorization', 'req.headers.cookie'],
       },
