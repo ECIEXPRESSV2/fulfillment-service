@@ -41,7 +41,16 @@ export class DeliveryResponseDto {
   @ApiPropertyOptional({ description: 'Nota asociada.', nullable: true, example: null })
   note!: string | null;
 
-  static from(delivery: DeliveryEntity): DeliveryResponseDto {
+  @ApiProperty({
+    description:
+      'Indica que el pedido YA estaba entregado y esta respuesta devuelve la entrega previa ' +
+      '(operación idempotente): no se creó una entrega nueva. El front debe advertir "este ' +
+      'pedido ya fue entregado" en vez de mostrar una confirmación nueva.',
+    example: false,
+  })
+  alreadyDelivered!: boolean;
+
+  static from(delivery: DeliveryEntity, alreadyDelivered = false): DeliveryResponseDto {
     return Object.assign(new DeliveryResponseDto(), {
       id: delivery.id,
       orderId: delivery.orderId,
@@ -51,6 +60,7 @@ export class DeliveryResponseDto {
       failureReason: delivery.failureReason,
       deliveredAt: delivery.deliveredAt,
       note: delivery.note,
+      alreadyDelivered,
     });
   }
 }

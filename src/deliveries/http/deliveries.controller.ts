@@ -44,9 +44,47 @@ export class DeliveriesController {
       'El vendedor confirma la entrega tras validar el código. Revalida todas las condiciones ' +
       '(no confía en una validación previa, RN-10), marca el código como usado, registra la ' +
       'entrega y publica `delivery.confirmed`. Es idempotente: confirmar dos veces el mismo ' +
-      'código no crea una segunda entrega.',
+      'código no crea una segunda entrega; en ese caso devuelve la entrega previa con ' +
+      '`alreadyDelivered: true` para que el front advierta que el pedido ya fue entregado.',
   })
-  @ApiOkResponse({ description: 'Entrega confirmada.', type: DeliveryResponseDto })
+  @ApiOkResponse({
+    description: 'Entrega confirmada (o entrega previa si el pedido ya estaba entregado).',
+    type: DeliveryResponseDto,
+    content: {
+      'application/json': {
+        examples: {
+          confirmada: {
+            summary: 'Entrega recién confirmada',
+            value: {
+              id: 'dlv_abc123',
+              orderId: 'ord_123',
+              storeId: 'str_9',
+              confirmedByUserId: 'usr_seller',
+              method: 'QR',
+              failureReason: null,
+              deliveredAt: '2026-06-18T17:30:00.000Z',
+              note: null,
+              alreadyDelivered: false,
+            },
+          },
+          yaEntregada: {
+            summary: 'El pedido ya estaba entregado (idempotente)',
+            value: {
+              id: 'dlv_abc123',
+              orderId: 'ord_123',
+              storeId: 'str_9',
+              confirmedByUserId: 'usr_seller',
+              method: 'QR',
+              failureReason: null,
+              deliveredAt: '2026-06-18T17:30:00.000Z',
+              note: null,
+              alreadyDelivered: true,
+            },
+          },
+        },
+      },
+    },
+  })
   @ApiBadRequestResponse({ description: 'El body no cumple el formato esperado.' })
   @ApiUnauthorizedResponse({ description: 'Falta el header de sesión del gateway.' })
   @ApiForbiddenResponse({ description: 'El código no pertenece a la tienda del vendedor.' })
@@ -57,8 +95,12 @@ export class DeliveriesController {
     @CurrentUser('userId') sellerUserId: string,
     @CorrelationId() correlationId?: string,
   ): Promise<DeliveryResponseDto> {
-    const delivery = await this.deliveriesService.confirmByCode(dto.code, sellerUserId, correlationId);
-    return DeliveryResponseDto.from(delivery);
+    const { delivery, alreadyDelivered } = await this.deliveriesService.confirmByCode(
+      dto.code,
+      sellerUserId,
+      correlationId,
+    );
+    return DeliveryResponseDto.from(delivery, alreadyDelivered);
   }
 
   @Post('orders/:orderId/manual-delivery')
@@ -69,10 +111,49 @@ export class DeliveriesController {
     description:
       'Registra la entrega manualmente cuando falla el flujo del QR. Solo usuarios con acceso ' +
       'a la tienda del pedido (owner/staff activo o ADMIN). `reason` es obligatorio. Marca el ' +
-      'código como usado si existe y publica `delivery.confirmed` con `method: MANUAL`.',
+      'código como usado si existe y publica `delivery.confirmed` con `method: MANUAL`. Es ' +
+      'idempotente: si el pedido ya estaba entregado devuelve la entrega previa con ' +
+      '`alreadyDelivered: true`.',
   })
   @ApiParam({ name: 'orderId', description: 'Id del pedido.', example: 'ord_123' })
-  @ApiOkResponse({ description: 'Entrega manual registrada.', type: DeliveryResponseDto })
+  @ApiOkResponse({
+    description: 'Entrega manual registrada (o entrega previa si el pedido ya estaba entregado).',
+    type: DeliveryResponseDto,
+    content: {
+      'application/json': {
+        examples: {
+          registrada: {
+            summary: 'Entrega manual recién registrada',
+            value: {
+              id: 'dlv_abc123',
+              orderId: 'ord_123',
+              storeId: 'str_9',
+              confirmedByUserId: 'usr_seller',
+              method: 'MANUAL',
+              failureReason: null,
+              deliveredAt: '2026-06-18T17:30:00.000Z',
+              note: 'La cámara del vendedor no escaneaba el QR.',
+              alreadyDelivered: false,
+            },
+          },
+          yaEntregada: {
+            summary: 'El pedido ya estaba entregado (idempotente)',
+            value: {
+              id: 'dlv_abc123',
+              orderId: 'ord_123',
+              storeId: 'str_9',
+              confirmedByUserId: 'usr_seller',
+              method: 'QR',
+              failureReason: null,
+              deliveredAt: '2026-06-18T17:30:00.000Z',
+              note: null,
+              alreadyDelivered: true,
+            },
+          },
+        },
+      },
+    },
+  })
   @ApiBadRequestResponse({ description: 'Falta el motivo u otro campo inválido.' })
   @ApiUnauthorizedResponse({ description: 'Falta el header de sesión del gateway.' })
   @ApiForbiddenResponse({ description: 'El usuario no tiene acceso a la tienda del pedido.' })
@@ -83,13 +164,13 @@ export class DeliveriesController {
     @CurrentUser('userId') sellerUserId: string,
     @CorrelationId() correlationId?: string,
   ): Promise<DeliveryResponseDto> {
-    const delivery = await this.deliveriesService.registerManualDelivery(
+    const { delivery, alreadyDelivered } = await this.deliveriesService.registerManualDelivery(
       orderId,
       sellerUserId,
       dto,
       correlationId,
     );
-    return DeliveryResponseDto.from(delivery);
+    return DeliveryResponseDto.from(delivery, alreadyDelivered);
   }
 
   @Post('orders/:orderId/delivery-failure')
