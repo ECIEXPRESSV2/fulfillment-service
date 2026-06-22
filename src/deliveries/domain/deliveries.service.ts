@@ -37,6 +37,17 @@ interface ConfirmedEventInput {
   correlationId?: string;
 }
 
+/**
+ * Resultado de una confirmación de entrega (UC-04/05). `alreadyDelivered` es `true` cuando la
+ * operación fue idempotente: el pedido ya tenía una entrega y se devuelve la existente sin
+ * crear otra ni republicar el evento. El front lo usa para advertir "ya fue entregado" en vez
+ * de mostrar una confirmación nueva.
+ */
+export interface DeliveryResult {
+  delivery: DeliveryEntity;
+  alreadyDelivered: boolean;
+}
+
 /** Filtros del historial por tienda (UC-10), ya desacoplados del DTO HTTP. */
 export interface ListStoreDeliveriesInput {
   page: number;
@@ -57,7 +68,7 @@ export interface FulfillmentStatusResult {
 }
 
 /**
- * Confirmación y registro de entregas (CLAUDE.md §UC-04/05/06). Todas las mutaciones escriben
+ * Confirmación y registro de entregas. Todas las mutaciones escriben
  * la `Delivery` y encolan el evento de salida en la MISMA transacción (Outbox, RN-16).
  */
 @Injectable()
@@ -82,7 +93,7 @@ export class DeliveriesService {
     code: string,
     sellerUserId: string,
     correlationId?: string,
-  ): Promise<DeliveryEntity> {
+  ): Promise<DeliveryResult> {
     const { code: found, error } = await this.codesService.resolveForValidation(code, sellerUserId);
 
     if (!found) {
@@ -98,6 +109,13 @@ export class DeliveriesService {
       });
     }
     if (error === ValidationError.CODE_ALREADY_USED) {
+      // Idempotencia ante doble confirmación (RN-10): si el código ya estaba USED y existe
+      // una entrega exitosa, la devolvemos marcada como `alreadyDelivered` para que el front
+      // advierta que ya se entregó; si no hay entrega, sí es un conflicto real.
+      const existing = await this.deliveriesRepo.findSuccessfulByOrderId(found.orderId);
+      if (existing) {
+        return { delivery: existing, alreadyDelivered: true };
+      }
       throw new ConflictException({
         code: 'CODE_ALREADY_USED',
         message: 'Este código de retiro ya fue utilizado.',
@@ -146,7 +164,7 @@ export class DeliveriesService {
         },
         manager,
       );
-      return delivery;
+      return { delivery, alreadyDelivered: false };
     });
   }
 
@@ -160,7 +178,7 @@ export class DeliveriesService {
     sellerUserId: string,
     input: ManualDeliveryInput,
     correlationId?: string,
-  ): Promise<DeliveryEntity> {
+  ): Promise<DeliveryResult> {
     const projection = await this.orderProjection.getByOrderId(orderId);
     if (!projection) {
       throw new NotFoundException({
@@ -171,7 +189,7 @@ export class DeliveriesService {
 
     const existing = await this.deliveriesRepo.findSuccessfulByOrderId(orderId);
     if (existing) {
-      return existing; // idempotente: ya se entregó
+      return { delivery: existing, alreadyDelivered: true }; // idempotente: ya se entregó
     }
 
     return this.dataSource.transaction(async (manager) => {
@@ -209,7 +227,7 @@ export class DeliveriesService {
         },
         manager,
       );
-      return delivery;
+      return { delivery, alreadyDelivered: false };
     });
   }
 
