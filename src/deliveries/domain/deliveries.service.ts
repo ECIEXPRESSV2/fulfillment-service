@@ -186,6 +186,14 @@ export class DeliveriesService {
         message: 'No encontramos información de retiro para este pedido.',
       });
     }
+    if (projection.status === 'cancelled') {
+      // Un pedido cancelado no se entrega por ninguna vía (la vía por código ya lo bloquea con
+      // CODE_INVALIDATED; aquí cerramos la fuga equivalente en la entrega manual).
+      throw new ConflictException({
+        code: 'ORDER_CANCELLED',
+        message: 'Este pedido fue cancelado; no se puede registrar la entrega.',
+      });
+    }
 
     const existing = await this.deliveriesRepo.findSuccessfulByOrderId(orderId);
     if (existing) {
@@ -246,6 +254,20 @@ export class DeliveriesService {
       throw new NotFoundException({
         code: 'ORDER_NOT_FOUND',
         message: 'No encontramos información de retiro para este pedido.',
+      });
+    }
+    if (projection.status === 'cancelled') {
+      throw new ConflictException({
+        code: 'ORDER_CANCELLED',
+        message: 'Este pedido fue cancelado; no se puede registrar una entrega fallida.',
+      });
+    }
+    const alreadyDelivered = await this.deliveriesRepo.findSuccessfulByOrderId(orderId);
+    if (alreadyDelivered) {
+      // No tiene sentido marcar como fallido un pedido que ya se entregó (registro contradictorio).
+      throw new ConflictException({
+        code: 'ALREADY_DELIVERED',
+        message: 'Este pedido ya fue entregado; no se puede marcarlo como fallido.',
       });
     }
     if (input.reason === DeliveryFailureReason.OTHER && !input.note) {
