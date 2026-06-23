@@ -217,6 +217,19 @@ describe('DeliveriesService', () => {
         service.registerManualDelivery('ord-x', 'seller-1', { reason: 'x' }),
       ).rejects.toMatchObject({ response: { code: 'ORDER_NOT_FOUND' } });
     });
+
+    it('409 ORDER_CANCELLED: no entrega un pedido cancelado (cierra la fuga de pago)', async () => {
+      const { service, orderProjection, deliveriesRepo, outbox } = build();
+      orderProjection.getByOrderId.mockResolvedValue({
+        orderId: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'cancelled', createdAt: new Date(), updatedAt: new Date(),
+      });
+
+      await expect(
+        service.registerManualDelivery('ord-1', 'seller-1', { reason: 'x' }),
+      ).rejects.toMatchObject({ response: { code: 'ORDER_CANCELLED' } });
+      expect(deliveriesRepo.create).not.toHaveBeenCalled();
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
   });
 
   describe('registerDeliveryFailure (UC-06)', () => {
@@ -256,6 +269,33 @@ describe('DeliveriesService', () => {
       await expect(
         service.registerDeliveryFailure('ord-1', 'seller-1', { reason: DeliveryFailureReason.OTHER }),
       ).rejects.toMatchObject({ response: { code: 'NOTE_REQUIRED' } });
+    });
+
+    it('409 ORDER_CANCELLED: no registra fallo de un pedido cancelado', async () => {
+      const { service, orderProjection, deliveriesRepo, outbox } = build();
+      orderProjection.getByOrderId.mockResolvedValue({ ...projection, status: 'cancelled' });
+
+      await expect(
+        service.registerDeliveryFailure('ord-1', 'seller-1', {
+          reason: DeliveryFailureReason.CUSTOMER_NO_SHOW,
+        }),
+      ).rejects.toMatchObject({ response: { code: 'ORDER_CANCELLED' } });
+      expect(deliveriesRepo.create).not.toHaveBeenCalled();
+      expect(outbox.enqueue).not.toHaveBeenCalled();
+    });
+
+    it('409 ALREADY_DELIVERED: no marca como fallido un pedido ya entregado', async () => {
+      const { service, orderProjection, deliveriesRepo, outbox } = build();
+      orderProjection.getByOrderId.mockResolvedValue(projection);
+      deliveriesRepo.findSuccessfulByOrderId.mockResolvedValue(buildDelivery());
+
+      await expect(
+        service.registerDeliveryFailure('ord-1', 'seller-1', {
+          reason: DeliveryFailureReason.CUSTOMER_NO_SHOW,
+        }),
+      ).rejects.toMatchObject({ response: { code: 'ALREADY_DELIVERED' } });
+      expect(deliveriesRepo.create).not.toHaveBeenCalled();
+      expect(outbox.enqueue).not.toHaveBeenCalled();
     });
   });
 
