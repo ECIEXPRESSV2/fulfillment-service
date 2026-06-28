@@ -26,18 +26,17 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   DATABASE_URL!: string;
 
-  // ── Bus de eventos ──
+  // ── Bus de eventos (Azure Service Bus, Managed Identity) ──
+  // FQDN del namespace: <namespace>.servicebus.windows.net (inyectado por Terraform).
   @IsString()
   @IsNotEmpty()
-  RABBITMQ_URL!: string;
+  SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE!: string;
 
   @IsString()
-  @IsNotEmpty()
-  RABBITMQ_EXCHANGE!: string;
+  SERVICE_BUS_TOPIC: string = 'eciexpress_events';
 
   @IsString()
-  @IsNotEmpty()
-  RABBITMQ_QUEUE!: string;
+  SERVICE_BUS_SUBSCRIPTION: string = 'fulfillment-service';
 
   // ── App ──
   @IsInt()

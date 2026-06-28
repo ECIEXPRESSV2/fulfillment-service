@@ -10,7 +10,7 @@ import { IsNull, LessThanOrEqual, Or, Repository } from 'typeorm';
 import { OutboxEventEntity } from '../database/entities/outbox-event.entity';
 import { OutboxStatus } from '../common/enums';
 import { EnvironmentVariables } from '../config/env.config';
-import { RabbitmqService } from './rabbitmq.service';
+import { ServiceBusPublisherService } from './service-bus-publisher.service';
 
 /** Cuántos eventos pendientes se intentan publicar por tick. */
 const BATCH_SIZE = 20;
@@ -31,7 +31,7 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
   constructor(
     @InjectRepository(OutboxEventEntity)
     private readonly repo: Repository<OutboxEventEntity>,
-    private readonly rabbitmq: RabbitmqService,
+    private readonly rabbitmq: ServiceBusPublisherService,
     config: ConfigService<EnvironmentVariables, true>,
   ) {
     this.maxRetries = config.get('OUTBOX_MAX_RETRIES', { infer: true });
