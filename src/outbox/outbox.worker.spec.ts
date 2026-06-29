@@ -3,7 +3,7 @@ import { Repository } from 'typeorm';
 import { OutboxStatus } from '../common/enums';
 import { OutboxEventEntity } from '../database/entities/outbox-event.entity';
 import { OutboxWorker } from './outbox.worker';
-import { RabbitmqService } from './rabbitmq.service';
+import { ServiceBusPublisherService } from './service-bus-publisher.service';
 
 const MAX_RETRIES = 3;
 const POLL_INTERVAL = 5000;
@@ -17,7 +17,7 @@ function buildWorker() {
   } as unknown as jest.Mocked<Repository<OutboxEventEntity>>;
 
   const publish = jest.fn();
-  const rabbitmq = { publish } as unknown as RabbitmqService;
+  const rabbitmq = { publish } as unknown as ServiceBusPublisherService;
 
   const config = {
     get: (key: string) =>
