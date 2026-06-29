@@ -16,10 +16,13 @@ ENV NODE_ENV=production
 
 RUN npm install -g pnpm
 
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --prod --frozen-lockfile
-
-COPY --from=builder /app/dist ./dist
+# Copia la app COMPLETA del builder (deps incl. dev, dist, src, data-source, tsconfig):
+# se necesitan ts-node + la fuente para correr las migraciones (migration:run) al arrancar.
+COPY --from=builder /app ./
 
 EXPOSE 3005
-CMD ["node", "dist/main.js"]
+
+# Migraciones al INICIAR: el contenedor corre dentro de la VNet y alcanza el Postgres
+# privado (no se pueden correr en build ni desde el pipeline, que no ve la red privada).
+# migration:run es idempotente (tabla de migraciones). Luego arranca la app.
+CMD ["sh", "-c", "pnpm run migration:run && node dist/main.js"]

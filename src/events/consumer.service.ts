@@ -5,104 +5,103 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as amqp from 'amqplib';
+import {
+  ServiceBusClient,
+  ServiceBusReceiver,
+  ServiceBusReceivedMessage,
+  ProcessErrorArgs,
+} from '@azure/service-bus';
+import { DefaultAzureCredential } from '@azure/identity';
 import { EnvironmentVariables } from '../config/env.config';
 import { IdentityHandler, IDENTITY_ROUTING_KEYS } from './handlers/identity.handler';
 import { ORDER_ROUTING_KEYS, OrderHandler } from './handlers/order.handler';
 
-const RETRY_COUNT_HEADER = 'x-retry-count';
-const ORIGINAL_ROUTING_KEY_HEADER = 'x-original-routing-key';
-const PREFETCH = 10;
+const MAX_CONCURRENT = 10;
 
 /**
- * Consumer de eventos (CLAUDE.md §10). Declara DLX→DLQ y la cola propia con
- * `x-dead-letter-exchange`, enlaza `order.#` e `identity.#`, consume con ack/nack manual y
- * despacha a los handlers. Error transitorio → reintento con backoff exponencial republicando
- * a la propia cola (preservando el routing key en un header); agotados → nack al DLQ.
+ * Consumer de eventos sobre Azure Service Bus. Abre un receiver sobre la subscription
+ * propia (`fulfillment-service`) y despacha a los handlers por routing-key (Subject del
+ * mensaje). El filtro por dominio (order.* / identity.*) vive en la regla SQL de la
+ * subscription (Terraform).
+ *
+ * Reintentos/DLQ: NATIVOS de Service Bus. Si el handler lanza (error transitorio), el
+ * mensaje se abandona y Service Bus lo reentrega; al superar maxDeliveryCount (definido
+ * en la subscription) va automáticamente a la dead-letter queue. Reemplaza al manejo
+ * manual de DLX/backoff que hacía amqplib.
  */
 @Injectable()
-export class ConsumerService implements OnApplicationBootstrap, OnModuleDestroy {
+export class ConsumerService
+  implements OnApplicationBootstrap, OnModuleDestroy
+{
   private readonly logger = new Logger(ConsumerService.name);
-  private connection?: amqp.ChannelModel;
-  private channel?: amqp.Channel;
-  private readonly maxRetries: number;
+  private client?: ServiceBusClient;
+  private receiver?: ServiceBusReceiver;
 
   constructor(
     private readonly config: ConfigService<EnvironmentVariables, true>,
     private readonly orderHandler: OrderHandler,
     private readonly identityHandler: IdentityHandler,
-  ) {
-    this.maxRetries = config.get('OUTBOX_MAX_RETRIES', { infer: true });
-  }
+  ) {}
 
-  async onApplicationBootstrap(): Promise<void> {
-    await this.connectAndConsume();
+  onApplicationBootstrap(): void {
+    const fqns = this.config.get('SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE', {
+      infer: true,
+    });
+    const topic = this.config.get('SERVICE_BUS_TOPIC', { infer: true });
+    const subscription = this.config.get('SERVICE_BUS_SUBSCRIPTION', {
+      infer: true,
+    });
+
+    this.client = new ServiceBusClient(fqns, new DefaultAzureCredential());
+    this.receiver = this.client.createReceiver(topic, subscription);
+
+    this.receiver.subscribe(
+      {
+        processMessage: async (msg: ServiceBusReceivedMessage) => {
+          const routingKey = (
+            msg.subject ??
+            (msg.applicationProperties?.routingKey as string | undefined) ??
+            ''
+          ).toString();
+          const event = (
+            typeof msg.body === 'object' && msg.body !== null ? msg.body : {}
+          ) as Record<string, unknown>;
+          // Si dispatch lanza, NO lo capturamos: Service Bus abandona y reentrega
+          // (retry/DLQ nativos).
+          await this.dispatch(routingKey, event);
+        },
+        processError: async (args: ProcessErrorArgs) => {
+          this.logger.error(
+            { err: args.error, entity: args.entityPath },
+            'Error en el receiver de Service Bus',
+          );
+        },
+      },
+      { maxConcurrentCalls: MAX_CONCURRENT },
+    );
+
+    this.logger.log(
+      `Consumer escuchando subscription "${subscription}" (order.*, identity.*)`,
+    );
   }
 
   async onModuleDestroy(): Promise<void> {
     try {
-      await this.channel?.close();
-      await this.connection?.close();
+      await this.receiver?.close();
+      await this.client?.close();
     } catch (error) {
-      this.logger.warn({ err: error }, 'Error cerrando el consumer de RabbitMQ');
+      this.logger.warn({ err: error }, 'Error cerrando el consumer de Service Bus');
     }
   }
 
-  private async connectAndConsume(): Promise<void> {
-    const url = this.config.get('RABBITMQ_URL', { infer: true });
-    const exchange = this.config.get('RABBITMQ_EXCHANGE', { infer: true });
-    const queue = this.config.get('RABBITMQ_QUEUE', { infer: true });
-    const dlx = `${queue}.dlx`;
-    const dlq = `${queue}.dlq`;
-
-    this.connection = await amqp.connect(url);
-    this.channel = await this.connection.createChannel();
-
-    await this.channel.assertExchange(exchange, 'topic', { durable: true });
-
-    // DLX → DLQ para mensajes que agotan reintentos (revisión manual).
-    await this.channel.assertExchange(dlx, 'topic', { durable: true });
-    await this.channel.assertQueue(dlq, { durable: true });
-    await this.channel.bindQueue(dlq, dlx, '#');
-
-    // Cola propia, con dead-letter hacia el DLX.
-    await this.channel.assertQueue(queue, { durable: true, deadLetterExchange: dlx });
-    await this.channel.bindQueue(queue, exchange, 'order.#');
-    await this.channel.bindQueue(queue, exchange, 'identity.#');
-
-    await this.channel.prefetch(PREFETCH);
-    await this.channel.consume(queue, (msg) => void this.handleMessage(msg, queue), { noAck: false });
-
-    this.logger.log(`Consumer escuchando "${queue}" (order.#, identity.#)`);
-  }
-
-  private async handleMessage(msg: amqp.ConsumeMessage | null, queue: string): Promise<void> {
-    if (!msg || !this.channel) return;
-
-    const headers = msg.properties.headers ?? {};
-    const routingKey =
-      (headers[ORIGINAL_ROUTING_KEY_HEADER] as string | undefined) ?? msg.fields.routingKey;
-
-    let event: Record<string, unknown>;
-    try {
-      event = JSON.parse(msg.content.toString()) as Record<string, unknown>;
-    } catch (error) {
-      // Mensaje no parseable: no es transitorio, va directo al DLQ.
-      this.logger.error({ err: error, routingKey }, 'Mensaje no parseable; al DLQ');
-      this.channel.nack(msg, false, false);
-      return;
-    }
-
-    try {
-      await this.dispatch(routingKey, event);
-      this.channel.ack(msg);
-    } catch (error) {
-      this.retryOrDeadLetter(msg, queue, routingKey, error);
-    }
-  }
-
-  private dispatch(routingKey: string, event: Record<string, unknown>): Promise<void> {
-    if (routingKey === ORDER_ROUTING_KEYS.confirmed || routingKey === ORDER_ROUTING_KEYS.cancelled) {
+  private dispatch(
+    routingKey: string,
+    event: Record<string, unknown>,
+  ): Promise<void> {
+    if (
+      routingKey === ORDER_ROUTING_KEYS.confirmed ||
+      routingKey === ORDER_ROUTING_KEYS.cancelled
+    ) {
       return this.orderHandler.handle(routingKey, event);
     }
     if (
@@ -111,43 +110,7 @@ export class ConsumerService implements OnApplicationBootstrap, OnModuleDestroy 
     ) {
       return this.identityHandler.handle(routingKey, event);
     }
-    // Routing key sin handler (llegó por el binding amplio): se ignora.
+    // Routing key sin handler (llegó por el filtro amplio): se ignora.
     return Promise.resolve();
-  }
-
-  private retryOrDeadLetter(
-    msg: amqp.ConsumeMessage,
-    queue: string,
-    routingKey: string,
-    error: unknown,
-  ): void {
-    if (!this.channel) return;
-
-    const retryCount = Number(msg.properties.headers?.[RETRY_COUNT_HEADER] ?? 0);
-
-    if (retryCount >= this.maxRetries) {
-      this.logger.error({ err: error, routingKey, retryCount }, 'Evento agotó reintentos; al DLQ');
-      this.channel.nack(msg, false, false);
-      return;
-    }
-
-    // Backoff exponencial: se reencola en la propia cola tras un retraso, conservando el
-    // routing key original en un header (sendToQueue lo perdería).
-    const delayMs = 2 ** retryCount * 1000;
-    this.logger.warn(
-      { err: error, routingKey, retryCount, delayMs },
-      'Fallo procesando evento; se reintentará con backoff',
-    );
-    this.channel.ack(msg);
-    setTimeout(() => {
-      this.channel?.sendToQueue(queue, msg.content, {
-        persistent: true,
-        headers: {
-          ...(msg.properties.headers ?? {}),
-          [RETRY_COUNT_HEADER]: retryCount + 1,
-          [ORIGINAL_ROUTING_KEY_HEADER]: routingKey,
-        },
-      });
-    }, delayMs);
   }
 }
