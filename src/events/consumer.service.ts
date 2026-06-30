@@ -44,6 +44,7 @@ export class ConsumerService
   ) {}
 
   onApplicationBootstrap(): void {
+    const connStr = process.env.SERVICE_BUS_CONNECTION_STRING;
     const fqns = this.config.get('SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE', {
       infer: true,
     });
@@ -52,7 +53,9 @@ export class ConsumerService
       infer: true,
     });
 
-    this.client = new ServiceBusClient(fqns, new DefaultAzureCredential());
+    this.client = connStr
+      ? new ServiceBusClient(connStr)
+      : new ServiceBusClient(fqns!, new DefaultAzureCredential());
     this.receiver = this.client.createReceiver(topic, subscription);
 
     this.receiver.subscribe(

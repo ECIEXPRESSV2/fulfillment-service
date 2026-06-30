@@ -40,16 +40,19 @@ export class ServiceBusPublisherService
     }
   }
 
-  /** Conexión idempotente: crea el cliente (MI) y el sender del topic compartido. */
+  /** Conexión idempotente: crea el cliente y el sender del topic compartido. */
   private connect(): void {
     if (this.sender) return;
 
+    const connStr = process.env.SERVICE_BUS_CONNECTION_STRING;
     const fqns = this.config.get('SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE', {
       infer: true,
     });
     const topic = this.config.get('SERVICE_BUS_TOPIC', { infer: true });
 
-    this.client = new ServiceBusClient(fqns, new DefaultAzureCredential());
+    this.client = connStr
+      ? new ServiceBusClient(connStr)
+      : new ServiceBusClient(fqns!, new DefaultAzureCredential());
     this.sender = this.client.createSender(topic);
     this.logger.log(`Publisher Service Bus listo (topic "${topic}")`);
   }
