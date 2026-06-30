@@ -26,11 +26,15 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   DATABASE_URL!: string;
 
-  // ── Bus de eventos (Azure Service Bus, Managed Identity) ──
-  // FQDN del namespace: <namespace>.servicebus.windows.net (inyectado por Terraform).
+  // ── Bus de eventos (Azure Service Bus) ──
+  // En prod: FQDN del namespace + Managed Identity. En local: connection string del emulador.
   @IsString()
-  @IsNotEmpty()
-  SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE!: string;
+  @IsOptional()
+  SERVICE_BUS_CONNECTION_STRING?: string;
+
+  @IsString()
+  @IsOptional()
+  SERVICE_BUS_FULLY_QUALIFIED_NAMESPACE?: string;
 
   @IsString()
   SERVICE_BUS_TOPIC: string = 'eciexpress_events';
