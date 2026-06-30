@@ -1,8 +1,9 @@
 import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
+import { StructuredLogger } from './common/logger/structured.logger';
+import { setupAppInsights } from './common/telemetry/app-insights';
 import { execSync, exec } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -78,12 +79,18 @@ process.on('SIGINT', () => {
 });
 
 async function bootstrap() {
+  // Inicializa Application Insights antes de crear la app para que el SDK pueda
+  // instrumentar HTTP/dependencias. No-op si no hay connection string (local).
+  setupAppInsights();
+
   // `cors: true` permite que el frontend (otro origen, ej. Vite en :5173) llame al servicio.
   // Igual que orders-service; en producción el API Gateway controla el origen real.
   const app = await NestFactory.create(AppModule, { bufferLogs: true, cors: true });
 
-  // Logger estructurado (Pino) para toda la app.
-  app.useLogger(app.get(Logger));
+  // Logger estructurado para toda la app: emite JSON a stdout y envía cada log a
+  // Application Insights con serviceName + userId. Las requests HTTP las recoge AI
+  // automáticamente (setAutoCollectRequests).
+  app.useLogger(new StructuredLogger());
 
   // Prefijo global /api/v1; `/` y `/health` quedan fuera (CLAUDE.md §7).
   app.setGlobalPrefix('api/v1', {
