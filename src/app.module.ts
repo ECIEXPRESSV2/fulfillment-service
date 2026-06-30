@@ -1,15 +1,11 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
-import { randomUUID } from 'node:crypto';
-import { LoggerModule } from 'nestjs-pino';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { validateEnv } from './config/env.config';
-import {
-  CORRELATION_ID_HEADER,
-  CorrelationIdInterceptor,
-} from './common/interceptors/correlation-id.interceptor';
+import { CorrelationIdInterceptor } from './common/interceptors/correlation-id.interceptor';
+import { LoggingMiddleware } from './common/logger/logging.middleware';
 import { GatewayAuthGuard } from './common/guards/gateway-auth.guard';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { AuditModule } from './audit/audit.module';
@@ -22,42 +18,11 @@ import { ExpirationModule } from './expiration/expiration.module';
 import { OutboxModule } from './outbox/outbox.module';
 import { QrModule } from './qr/qr.module';
 
-/** Indica si `pino-pretty` está instalado y se puede usar como transporte. */
-function isPrettyAvailable(): boolean {
-  try {
-    require.resolve('pino-pretty');
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       validate: validateEnv,
-    }),
-    LoggerModule.forRoot({
-      pinoHttp: {
-        // Genera/propaga el correlation id desde el header; queda en `req.id` y en todos los logs.
-        genReqId: (req, res) => {
-          const incoming = req.headers[CORRELATION_ID_HEADER];
-          const id = (Array.isArray(incoming) ? incoming[0] : incoming) ?? randomUUID();
-          res.setHeader(CORRELATION_ID_HEADER, id);
-          return id;
-        },
-        customProps: (req) => ({ correlationId: (req as { id?: string }).id }),
-        level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-        // pino-pretty es devDependency: solo se usa si está instalado y no estamos en
-        // producción. En la imagen de producción se omite y se loguea JSON estructurado.
-        transport:
-          process.env.NODE_ENV !== 'production' && isPrettyAvailable()
-            ? { target: 'pino-pretty', options: { singleLine: true } }
-            : undefined,
-        // No loguear PII más allá de ids (CLAUDE.md §13).
-        redact: ['req.headers.authorization', 'req.headers.cookie'],
-      },
     }),
     DatabaseModule,
     AuditModule,
@@ -78,4 +43,10 @@ function isPrettyAvailable(): boolean {
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // Rellena el userId (header x-user-id) en el contexto de logging para que cada
+    // log enviado a Application Insights incluya customDimensions.userId.
+    consumer.apply(LoggingMiddleware).forRoutes('*');
+  }
+}
