@@ -26,6 +26,7 @@
   "dependencies": {
     "@azure/identity": "^4.5.0",
     "@azure/service-bus": "^7.9.5",
+    "@azure/storage-blob": "^12.26.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.0.1",
@@ -43,6 +44,7 @@
     "qrcode": "^1.5.4",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "sharp": "^0.33.5",
     "swagger-ui-express": "^5.0.0",
     "typeorm": "^0.3.25",
     "uuid": "^14.0.0"
@@ -88,7 +90,21 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t|j)s",
+      "!**/*.module.ts",
+      "!**/main.ts",
+      "!**/*.dto.ts",
+      "!**/*.entity.ts",
+      "!**/entities/index.ts",
+      "!**/migrations/**",
+      "!**/config/**",
+      "!**/*.decorator.ts",
+      "!**/database/data-source.ts",
+      "!**/database/database.config.ts",
+      "!**/database/naming.strategy.ts",
+      "!**/common/telemetry/**",
+      "!**/common/logger/**",
+      "!**/app.module.ts"
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
