@@ -99,6 +99,8 @@ async function bootstrap() {
       { path: 'health', method: RequestMethod.GET },
       // Imagen pública del QR: vive en /fulfillment/qr/:file, fuera de /api/v1 (CLAUDE.md §7).
       { path: 'fulfillment/qr/:file', method: RequestMethod.GET },
+      // Imagen pública de entrega: /fulfillment/delivery/:orderId, fuera de /api/v1 (CLAUDE.md §7).
+      { path: 'fulfillment/delivery/:orderId', method: RequestMethod.GET },
     ],
   });
 

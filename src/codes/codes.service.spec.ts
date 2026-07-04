@@ -5,6 +5,8 @@ import { PickupCodeStatus } from '../common/enums';
 import { PickupCodeEntity } from '../database/entities/pickup-code.entity';
 import { StoreStaffProjectionService } from '../events/projections/store-staff-projection.service';
 import { OutboxService } from '../outbox/outbox.service';
+import { BlobStorageService } from '../storage/blob-storage.service';
+import { QrService } from '../qr/domain/qr.service';
 import { CodesService } from './domain/codes.service';
 import { ValidationError } from './domain/pickup-code.types';
 import { ShortCodeRateLimiter } from './domain/short-code-rate-limiter';
@@ -31,7 +33,7 @@ function buildCode(overrides: Partial<PickupCodeEntity> = {}): PickupCodeEntity 
   } as PickupCodeEntity;
 }
 
-function build() {
+function build(blobOverride: Record<string, unknown> = {}) {
   const repo = {
     findActiveByOrderId: jest.fn(),
     create: jest.fn(),
@@ -48,11 +50,27 @@ function build() {
     safeRecord: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<AuditService>;
   const config = {
-    get: (key: string) => (key === 'PICKUP_CODE_FALLBACK_EXPIRY_HOURS' ? FALLBACK_HOURS : BASE_URL),
+    get: (key: string) => {
+      if (key === 'PICKUP_CODE_FALLBACK_EXPIRY_HOURS') return FALLBACK_HOURS;
+      if (key === 'QR_SAS_TTL_HOURS') return 24;
+      if (key === 'AZURE_STORAGE_QR_CONTAINER') return 'qr-codes';
+      return BASE_URL;
+    },
   } as unknown as ConfigService;
 
-  const service = new CodesService(repo, outbox, storeStaff, rateLimiter, audit, config);
-  return { service, repo, outbox, storeStaff, rateLimiter, audit };
+  const qr = {
+    generatePng: jest.fn().mockResolvedValue(Buffer.from('png')),
+  } as unknown as jest.Mocked<QrService>;
+
+  // Por defecto blob deshabilitado: el QR cae al endpoint público de fallback (sin Azure).
+  const blob = {
+    enabled: false,
+    uploadWithReadSas: jest.fn(),
+    ...blobOverride,
+  } as unknown as jest.Mocked<BlobStorageService>;
+
+  const service = new CodesService(repo, outbox, storeStaff, rateLimiter, audit, qr, blob, config);
+  return { service, repo, outbox, storeStaff, rateLimiter, audit, qr, blob };
 }
 
 describe('CodesService', () => {
@@ -76,6 +94,53 @@ describe('CodesService', () => {
           routingKey: 'fulfillment.qr.generated',
           business: expect.objectContaining({
             qrCode: expect.stringContaining(`${BASE_URL}/fulfillment/qr/`),
+          }),
+        }),
+      );
+    });
+
+    it('con blob habilitado sube el QR y publica la SAS URL como imageUrl', async () => {
+      const { service, repo, outbox, qr } = build({
+        enabled: true,
+        uploadWithReadSas: jest.fn().mockResolvedValue('https://blob/qr.png?sig=abc'),
+      });
+      repo.findActiveByOrderId.mockResolvedValue(null);
+      repo.create.mockResolvedValue(buildCode());
+
+      await service.generateForOrder(tx, { orderId: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1' });
+
+      expect(qr.generatePng).toHaveBeenCalled();
+      expect(outbox.enqueue).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          business: expect.objectContaining({
+            imageUrl: 'https://blob/qr.png?sig=abc',
+            qrCode: 'https://blob/qr.png?sig=abc',
+          }),
+        }),
+      );
+    });
+
+    it('si la subida al blob falla, cae al endpoint público sin romper la confirmación', async () => {
+      const { service, repo, outbox } = build({
+        enabled: true,
+        uploadWithReadSas: jest.fn().mockRejectedValue(new Error('blob down')),
+      });
+      repo.findActiveByOrderId.mockResolvedValue(null);
+      repo.create.mockResolvedValue(buildCode());
+
+      const result = await service.generateForOrder(tx, {
+        orderId: 'ord-1',
+        buyerId: 'buyer-1',
+        storeId: 'str-1',
+      });
+
+      expect(result.created).toBe(true);
+      expect(outbox.enqueue).toHaveBeenCalledWith(
+        tx,
+        expect.objectContaining({
+          business: expect.objectContaining({
+            imageUrl: expect.stringContaining(`${BASE_URL}/fulfillment/qr/`),
           }),
         }),
       );
