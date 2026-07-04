@@ -1,4 +1,6 @@
+import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
+import { EnvironmentVariables } from '../config/env.config';
 import { CodesService } from '../codes/domain/codes.service';
 import { ValidationError } from '../codes/domain/pickup-code.types';
 import { AuditService } from '../audit/audit.service';
@@ -80,6 +82,10 @@ function build() {
 
   const audit = { record: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<AuditService>;
 
+  const config = {
+    get: jest.fn().mockReturnValue('http://localhost:3005'),
+  } as unknown as ConfigService<EnvironmentVariables, true>;
+
   const service = new DeliveriesService(
     dataSource,
     codesService,
@@ -89,6 +95,7 @@ function build() {
     storeStaff,
     outbox,
     audit,
+    config,
   );
   return { service, codesService, codesRepo, deliveriesRepo, orderProjection, storeStaff, outbox, audit };
 }

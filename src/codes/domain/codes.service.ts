@@ -3,6 +3,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -13,6 +14,8 @@ import { AuditAction, PickupCodeStatus } from '../../common/enums';
 import { PickupCodeEntity } from '../../database/entities/pickup-code.entity';
 import { StoreStaffProjectionService } from '../../events/projections/store-staff-projection.service';
 import { OutboxService } from '../../outbox/outbox.service';
+import { BlobStorageService } from '../../storage/blob-storage.service';
+import { QrService } from '../../qr/domain/qr.service';
 import { CodesRepository } from '../infra/codes.repository';
 import {
   generateShortCode,
@@ -47,8 +50,11 @@ const MS_PER_HOUR = 60 * 60 * 1000;
  */
 @Injectable()
 export class CodesService {
+  private readonly logger = new Logger(CodesService.name);
   private readonly fallbackExpiryHours: number;
   private readonly publicBaseUrl: string;
+  private readonly qrContainer: string;
+  private readonly qrSasTtlHours: number;
 
   constructor(
     private readonly repo: CodesRepository,
@@ -56,10 +62,14 @@ export class CodesService {
     private readonly storeStaff: StoreStaffProjectionService,
     private readonly rateLimiter: ShortCodeRateLimiter,
     private readonly audit: AuditService,
+    private readonly qr: QrService,
+    private readonly blob: BlobStorageService,
     config: ConfigService<EnvironmentVariables, true>,
   ) {
     this.fallbackExpiryHours = config.get('PICKUP_CODE_FALLBACK_EXPIRY_HOURS', { infer: true });
     this.publicBaseUrl = config.get('PUBLIC_BASE_URL', { infer: true });
+    this.qrContainer = config.get('AZURE_STORAGE_QR_CONTAINER', { infer: true });
+    this.qrSasTtlHours = config.get('QR_SAS_TTL_HOURS', { infer: true });
   }
 
   /**
@@ -92,6 +102,11 @@ export class CodesService {
       manager,
     );
 
+    // Sube el PNG del QR al blob privado y firma su SAS de lectura. Notification lo manda como
+    // imagen por WhatsApp (Meta descarga la URL). Si el blob no está configurado o falla, se cae
+    // al endpoint público de fallback para no bloquear la confirmación del pedido.
+    const qrImageUrl = await this.buildQrImageUrl(input.orderId, token, expiresAt);
+
     await this.outbox.enqueue(manager, {
       aggregateId: input.orderId,
       aggregateType: 'PickupCode',
@@ -100,7 +115,8 @@ export class CodesService {
       business: {
         orderId: input.orderId,
         buyerId: input.buyerId,
-        qrCode: this.buildQrUrl(token),
+        qrCode: qrImageUrl,
+        imageUrl: qrImageUrl,
         shortCode,
         expiresAt: expiresAt.toISOString(),
       },
@@ -261,5 +277,35 @@ export class CodesService {
 
   private buildQrUrl(token: string): string {
     return `${this.publicBaseUrl}/fulfillment/qr/${token}.png`;
+  }
+
+  /**
+   * Sube el PNG del QR al contenedor privado y devuelve su URL con SAS de lectura. El SAS vive lo
+   * suficiente para que el usuario abra el correo/WhatsApp: el mayor entre `QR_SAS_TTL_HOURS` y lo
+   * que falte para que el código expire, más una holgura. Ante blob deshabilitado o error, cae al
+   * endpoint público (`/fulfillment/qr/:token.png`) para no romper el flujo de confirmación.
+   */
+  private async buildQrImageUrl(orderId: string, token: string, expiresAt: Date): Promise<string> {
+    if (!this.blob.enabled) {
+      return this.buildQrUrl(token);
+    }
+    try {
+      const png = await this.qr.generatePng(token);
+      const minutesUntilExpiry = Math.ceil((expiresAt.getTime() - Date.now()) / 60_000);
+      const ttlMinutes = Math.max(this.qrSasTtlHours * 60, minutesUntilExpiry + 120);
+      return await this.blob.uploadWithReadSas({
+        container: this.qrContainer,
+        blobName: `${orderId}/${token}.png`,
+        content: png,
+        contentType: 'image/png',
+        ttlMinutes,
+      });
+    } catch (error) {
+      this.logger.error(
+        { err: error, orderId },
+        'No se pudo subir el QR al blob; se usa el endpoint público de fallback',
+      );
+      return this.buildQrUrl(token);
+    }
   }
 }

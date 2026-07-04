@@ -5,7 +5,9 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
+import { EnvironmentVariables } from '../../config/env.config';
 import { AuditService } from '../../audit/audit.service';
 import { CodesService } from '../../codes/domain/codes.service';
 import { ValidationError } from '../../codes/domain/pickup-code.types';
@@ -73,6 +75,8 @@ export interface FulfillmentStatusResult {
  */
 @Injectable()
 export class DeliveriesService {
+  private readonly publicBaseUrl: string;
+
   constructor(
     private readonly dataSource: DataSource,
     private readonly codesService: CodesService,
@@ -82,7 +86,10 @@ export class DeliveriesService {
     private readonly storeStaff: StoreStaffProjectionService,
     private readonly outbox: OutboxService,
     private readonly audit: AuditService,
-  ) {}
+    config: ConfigService<EnvironmentVariables, true>,
+  ) {
+    this.publicBaseUrl = config.get('PUBLIC_BASE_URL', { infer: true });
+  }
 
   /**
    * UC-04: confirma la entrega por QR. Revalida el código (no confía en una validación previa,
@@ -405,6 +412,9 @@ export class DeliveriesService {
         storeId: event.storeId,
         method: event.method,
         deliveredAt: event.deliveredAt.toISOString(),
+        // Comprobante genérico de entrega (con el ID del pedido impreso) que Notification manda
+        // como imagen por WhatsApp. Público: Meta lo descarga por URL.
+        imageUrl: `${this.publicBaseUrl}/fulfillment/delivery/${event.orderId}.png`,
       },
       correlationId: event.correlationId,
     });
