@@ -44,6 +44,13 @@ export interface PickupCodeView {
 const MS_PER_HOUR = 60 * 60 * 1000;
 
 /**
+ * Marcador de versión del build. Se imprime en cada generación de QR para confirmar
+ * por logs qué imagen está realmente desplegada (grep de este tag) y si el QR salió por
+ * blob o por el endpoint de fallback. Súbelo cuando cambies algo del path del QR.
+ */
+const QR_GEN_BUILD_TAG = 'qr-gen:v2-blob-logging';
+
+/**
  * Lógica de los códigos de retiro (CLAUDE.md §6). Generación idempotente (UC-01),
  * validación de solo lectura con motivos tipificados (UC-03) y consulta del comprador (UC-02).
  * La confirmación de entrega (UC-04) vive en el módulo `deliveries` (crea la `Delivery`).
@@ -106,6 +113,15 @@ export class CodesService {
     // imagen por WhatsApp (Meta descarga la URL). Si el blob no está configurado o falla, se cae
     // al endpoint público de fallback para no bloquear la confirmación del pedido.
     const qrImageUrl = await this.buildQrImageUrl(input.orderId, token, expiresAt);
+
+    // Log de confirmación de versión + origen de la imagen (blob vs fallback). Sirve para
+    // verificar tras un redeploy que corre el build final y para diagnosticar la entrega
+    // del QR por WhatsApp. No loguea el SAS completo, solo el host.
+    this.logger.log(
+      `[${QR_GEN_BUILD_TAG}] QR generado order=${input.orderId} ` +
+        `via=${qrImageUrl.includes('blob.core.windows.net') ? 'blob' : 'fallback'} ` +
+        `blobEnabled=${this.blob.enabled} host=${this.safeHost(qrImageUrl)}`,
+    );
 
     await this.outbox.enqueue(manager, {
       aggregateId: input.orderId,
@@ -287,25 +303,43 @@ export class CodesService {
    */
   private async buildQrImageUrl(orderId: string, token: string, expiresAt: Date): Promise<string> {
     if (!this.blob.enabled) {
+      // Rama silenciosa histórica: sin este log no había forma de distinguir "blob
+      // deshabilitado" de "subida fallida". AZURE_STORAGE_ACCOUNT vacío cae aquí.
+      this.logger.warn(
+        `[${QR_GEN_BUILD_TAG}] blob deshabilitado (AZURE_STORAGE_ACCOUNT vacío); QR por fallback order=${orderId}`,
+      );
       return this.buildQrUrl(token);
     }
     try {
       const png = await this.qr.generatePng(token);
       const minutesUntilExpiry = Math.ceil((expiresAt.getTime() - Date.now()) / 60_000);
       const ttlMinutes = Math.max(this.qrSasTtlHours * 60, minutesUntilExpiry + 120);
-      return await this.blob.uploadWithReadSas({
+      const url = await this.blob.uploadWithReadSas({
         container: this.qrContainer,
         blobName: `${orderId}/${token}.png`,
         content: png,
         contentType: 'image/png',
         ttlMinutes,
       });
+      this.logger.log(
+        `[${QR_GEN_BUILD_TAG}] QR subido a blob order=${orderId} container=${this.qrContainer} host=${this.safeHost(url)}`,
+      );
+      return url;
     } catch (error) {
       this.logger.error(
         { err: error, orderId },
         'No se pudo subir el QR al blob; se usa el endpoint público de fallback',
       );
       return this.buildQrUrl(token);
+    }
+  }
+
+  /** Host de una URL para loguear sin exponer token/SAS; string vacío si no parsea. */
+  private safeHost(url: string): string {
+    try {
+      return new URL(url).host;
+    } catch {
+      return '';
     }
   }
 }
