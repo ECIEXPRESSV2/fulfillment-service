@@ -9,6 +9,7 @@ import { OrderProjectionService } from '../projections/order-projection.service'
 /** Routing keys de Order que consume Fulfillment. */
 export const ORDER_ROUTING_KEYS = {
   confirmed: 'order.order.confirmed',
+  readyForPickup: 'order.order.ready_for_pickup',
   cancelled: 'order.order.cancelled',
 } as const;
 
@@ -46,6 +47,9 @@ export class OrderHandler {
           case ORDER_ROUTING_KEYS.confirmed:
             await this.onConfirmed(event, manager);
             break;
+          case ORDER_ROUTING_KEYS.readyForPickup:
+            await this.onReadyForPickup(event, manager);
+            break;
           case ORDER_ROUTING_KEYS.cancelled:
             await this.onCancelled(event, manager);
             break;
@@ -72,7 +76,7 @@ export class OrderHandler {
     }
   }
 
-  /** UC-01: proyecta el pedido y genera su código de retiro. */
+  /** Proyecta el pedido cuando se confirma (sin generar QR aún). */
   private async onConfirmed(
     event: EventRecord,
     manager: EntityManager,
@@ -94,6 +98,33 @@ export class OrderHandler {
       { orderId, orderNumber, buyerId, storeId, pickupExpiresAt },
       manager,
     );
+  }
+
+  /** Genera el QR cuando la tienda marca el pedido como listo para entregar. */
+  private async onReadyForPickup(
+    event: EventRecord,
+    manager: EntityManager,
+  ): Promise<void> {
+    const orderId = this.str(event.orderId);
+    const orderNumber = this.str(event.orderNumber);
+    const buyerId = this.str(event.buyerId);
+    const storeId = this.str(event.storeId);
+    if (!orderId || !buyerId || !storeId) {
+      this.logger.warn(
+        { event },
+        'order.order.ready_for_pickup incompleto; se ignora',
+      );
+      return;
+    }
+    const pickupExpiresAt = this.date(event.pickupExpiresAt);
+
+    await this.orderProjection.upsertFromConfirmed(
+      { orderId, orderNumber, buyerId, storeId, pickupExpiresAt },
+      manager,
+    );
+    // Invalida cualquier código ACTIVE previo (generado al CONFIRMED con otro expiry)
+    // para forzar la generación del QR con el pickupExpiresAt correcto.
+    await this.codesService.invalidateByOrder(manager, orderId);
     await this.codesService.generateForOrder(manager, {
       orderId,
       buyerId,
