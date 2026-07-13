@@ -116,10 +116,11 @@ describe('DeliveriesController', () => {
     const { controller, service } = build();
     service.listStoreDeliveries.mockResolvedValue({
       data: [
-        { delivery: buildDelivery(), orderNumber: 'OC-20260713-6632' },
+        { delivery: buildDelivery(), orderNumber: 'OC-20260713-6632', confirmedByUserName: 'Laura Gomez' },
         {
           delivery: buildDelivery({ id: 'dlv-2' }),
           orderNumber: 'OC-20260713-6633',
+          confirmedByUserName: 'Laura Gomez',
         },
       ],
       total: 2,
@@ -136,6 +137,7 @@ describe('DeliveriesController', () => {
     });
     expect(res.data).toHaveLength(2);
     expect(res.total).toBe(2);
+    expect(res.data[0].confirmedByUserName).toBe('Laura Gomez');
     expect(res.page).toBe(1);
   });
 });

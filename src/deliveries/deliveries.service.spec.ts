@@ -76,6 +76,7 @@ function build() {
 
   const storeStaff = {
     isAuthorized: jest.fn().mockResolvedValue(false),
+    getUserName: jest.fn().mockResolvedValue('Laura Gomez'),
   } as unknown as jest.Mocked<StoreStaffProjectionService>;
 
   const outbox = { enqueue: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<OutboxService>;

@@ -25,10 +25,11 @@ export class StoreStaffProjectionService {
   async upsertOwner(
     storeId: string,
     ownerId: string,
+    ownerName?: string,
     manager?: EntityManager,
   ): Promise<void> {
     await this.r(manager).upsert(
-      { id: randomUUID(), storeId, userId: ownerId, role: StoreStaffRole.OWNER, isActive: true, updatedAt: new Date() },
+      { id: randomUUID(), storeId, userId: ownerId, userName: ownerName ?? null, role: StoreStaffRole.OWNER, isActive: true, updatedAt: new Date() },
       { conflictPaths: ['storeId', 'userId'], skipUpdateIfNoValuesChanged: false },
     );
   }
@@ -37,10 +38,11 @@ export class StoreStaffProjectionService {
   async assignStaff(
     storeId: string,
     userId: string,
+    userName?: string,
     manager?: EntityManager,
   ): Promise<void> {
     await this.r(manager).upsert(
-      { id: randomUUID(), storeId, userId, role: StoreStaffRole.STAFF, isActive: true, updatedAt: new Date() },
+      { id: randomUUID(), storeId, userId, userName: userName ?? null, role: StoreStaffRole.STAFF, isActive: true, updatedAt: new Date() },
       { conflictPaths: ['storeId', 'userId'], skipUpdateIfNoValuesChanged: false },
     );
   }
@@ -60,5 +62,13 @@ export class StoreStaffProjectionService {
       where: { storeId, userId, isActive: true },
     });
     return record !== null;
+  }
+
+  async getUserName(storeId: string, userId: string): Promise<string | null> {
+    const record = await this.repo.findOne({
+      where: { storeId, userId },
+      select: { userName: true },
+    });
+    return record?.userName ?? null;
   }
 }

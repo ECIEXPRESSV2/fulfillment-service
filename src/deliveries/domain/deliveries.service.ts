@@ -411,7 +411,11 @@ export class DeliveriesService {
     storeId: string,
     input: ListStoreDeliveriesInput,
   ): Promise<{
-    data: Array<{ delivery: DeliveryEntity; orderNumber: string | null }>;
+    data: Array<{
+      delivery: DeliveryEntity;
+      orderNumber: string | null;
+      confirmedByUserName: string | null;
+    }>;
     total: number;
     page: number;
     limit: number;
@@ -430,7 +434,11 @@ export class DeliveriesService {
         const projection = await this.orderProjection.getByOrderId(
           delivery.orderId,
         );
-        return { delivery, orderNumber: projection?.orderNumber ?? null };
+        const confirmedByUserName = await this.storeStaff.getUserName(
+          delivery.storeId,
+          delivery.confirmedByUserId,
+        );
+        return { delivery, orderNumber: projection?.orderNumber ?? null, confirmedByUserName };
       }),
     );
     return { data: enriched, total, page: input.page, limit: input.limit };

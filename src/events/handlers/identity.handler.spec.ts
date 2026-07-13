@@ -32,6 +32,7 @@ describe('IdentityHandler', () => {
     await handler.handle(IDENTITY_ROUTING_KEYS.storeCreated, {
       storeId: 'str-1',
       ownerId: 'usr-owner',
+      ownerName: 'Andrea Ruiz',
       idempotencyKey: 'idem-1',
     });
 
@@ -39,6 +40,7 @@ describe('IdentityHandler', () => {
     expect(storeStaff.upsertOwner).toHaveBeenCalledWith(
       'str-1',
       'usr-owner',
+      'Andrea Ruiz',
       expect.anything(),
     );
     expect(idempotency.markProcessed).toHaveBeenCalledWith(
@@ -54,6 +56,7 @@ describe('IdentityHandler', () => {
     await handler.handle(IDENTITY_ROUTING_KEYS.staffChanged, {
       storeId: 'str-1',
       userId: 'usr-2',
+      userName: 'Laura Gomez',
       action: 'assigned',
       idempotencyKey: 'idem-2',
     });
@@ -62,6 +65,7 @@ describe('IdentityHandler', () => {
     expect(storeStaff.assignStaff).toHaveBeenCalledWith(
       'str-1',
       'usr-2',
+      'Laura Gomez',
       expect.anything(),
     );
   });

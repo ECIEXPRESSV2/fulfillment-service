@@ -313,8 +313,8 @@ export class DeliveriesController {
       query,
     );
     return {
-      data: result.data.map(({ delivery, orderNumber }) =>
-        DeliveryResponseDto.from(delivery, false, orderNumber),
+      data: result.data.map(({ delivery, orderNumber, confirmedByUserName }) =>
+        DeliveryResponseDto.from(delivery, false, orderNumber, confirmedByUserName),
       ),
       total: result.total,
       page: result.page,

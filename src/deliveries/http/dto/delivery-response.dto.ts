@@ -24,6 +24,13 @@ export class DeliveryResponseDto {
     example: 'usr_seller',
   })
   confirmedByUserId!: string;
+  @ApiPropertyOptional({
+    description: 'Nombre del usuario que registro la entrega.',
+    nullable: true,
+    example: 'Laura Gomez',
+  })
+  confirmedByUserName!: string | null;
+
 
   @ApiPropertyOptional({
     description: 'Método de entrega. `null` en entregas fallidas.',
@@ -67,6 +74,7 @@ export class DeliveryResponseDto {
     delivery: DeliveryEntity,
     alreadyDelivered = false,
     orderNumber: string | null = null,
+    confirmedByUserName: string | null = null,
   ): DeliveryResponseDto {
     return Object.assign(new DeliveryResponseDto(), {
       id: delivery.id,
@@ -74,6 +82,7 @@ export class DeliveryResponseDto {
       storeId: delivery.storeId,
       orderNumber,
       confirmedByUserId: delivery.confirmedByUserId,
+      confirmedByUserName,
       method: delivery.method,
       failureReason: delivery.failureReason,
       deliveredAt: delivery.deliveredAt,

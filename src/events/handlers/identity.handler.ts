@@ -61,24 +61,26 @@ export class IdentityHandler {
   private async onStoreCreated(event: EventRecord, manager: EntityManager): Promise<void> {
     const storeId = this.str(event.storeId);
     const ownerId = this.str(event.ownerId);
+    const ownerName = this.str(event.ownerName);
     if (!storeId || !ownerId) {
       this.logger.warn({ event }, 'identity.store.created sin storeId/ownerId; se ignora');
       return;
     }
-    await this.storeStaff.upsertOwner(storeId, ownerId, manager);
+    await this.storeStaff.upsertOwner(storeId, ownerId, ownerName, manager);
   }
 
   private async onStaffChanged(event: EventRecord, manager: EntityManager): Promise<void> {
     const storeId = this.str(event.storeId);
     const userId = this.str(event.userId);
     const action = this.str(event.action);
+    const userName = this.str(event.userName);
     if (!storeId || !userId || !action) {
       this.logger.warn({ event }, 'identity.store.staff_changed incompleto; se ignora');
       return;
     }
 
     if (action === 'assigned') {
-      await this.storeStaff.assignStaff(storeId, userId, manager);
+      await this.storeStaff.assignStaff(storeId, userId, userName, manager);
     } else if (action === 'removed') {
       await this.storeStaff.removeStaff(storeId, userId, manager);
     } else {
