@@ -22,6 +22,9 @@ export class StoreStaffProjectionEntity {
   @Column({ name: 'user_id' })
   userId: string;
 
+  @Column({ name: 'user_name', type: 'text', nullable: true })
+  userName: string | null;
+
   @Column({
     type: 'enum',
     enum: StoreStaffRole,

@@ -5,6 +5,7 @@ import { OrderProjectionEntity } from '../../database/entities/order-projection.
 
 export type OrderProjectionInput = {
   orderId: string;
+  orderNumber?: string | null;
   buyerId: string;
   storeId: string;
   pickupExpiresAt?: Date | null;
@@ -35,6 +36,7 @@ export class OrderProjectionService {
     await this.r(manager).upsert(
       {
         orderId: input.orderId,
+        orderNumber: input.orderNumber ?? null,
         buyerId: input.buyerId,
         storeId: input.storeId,
         pickupExpiresAt: input.pickupExpiresAt ?? null,

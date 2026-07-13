@@ -1,4 +1,13 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiConflictResponse,
@@ -48,7 +57,8 @@ export class DeliveriesController {
       '`alreadyDelivered: true` para que el front advierta que el pedido ya fue entregado.',
   })
   @ApiOkResponse({
-    description: 'Entrega confirmada (o entrega previa si el pedido ya estaba entregado).',
+    description:
+      'Entrega confirmada (o entrega previa si el pedido ya estaba entregado).',
     type: DeliveryResponseDto,
     content: {
       'application/json': {
@@ -85,21 +95,30 @@ export class DeliveriesController {
       },
     },
   })
-  @ApiBadRequestResponse({ description: 'El body no cumple el formato esperado.' })
-  @ApiUnauthorizedResponse({ description: 'Falta el header de sesión del gateway.' })
-  @ApiForbiddenResponse({ description: 'El código no pertenece a la tienda del vendedor.' })
+  @ApiBadRequestResponse({
+    description: 'El body no cumple el formato esperado.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Falta el header de sesión del gateway.',
+  })
+  @ApiForbiddenResponse({
+    description: 'El código no pertenece a la tienda del vendedor.',
+  })
   @ApiNotFoundResponse({ description: 'No existe un código con ese valor.' })
-  @ApiConflictResponse({ description: 'El código está vencido, anulado o ya fue usado.' })
+  @ApiConflictResponse({
+    description: 'El código está vencido, anulado o ya fue usado.',
+  })
   async confirm(
     @Body() dto: ConfirmCodeDto,
     @CurrentUser('userId') sellerUserId: string,
     @CorrelationId() correlationId?: string,
   ): Promise<DeliveryResponseDto> {
-    const { delivery, alreadyDelivered } = await this.deliveriesService.confirmByCode(
-      dto.code,
-      sellerUserId,
-      correlationId,
-    );
+    const { delivery, alreadyDelivered } =
+      await this.deliveriesService.confirmByCode(
+        dto.code,
+        sellerUserId,
+        correlationId,
+      );
     return DeliveryResponseDto.from(delivery, alreadyDelivered);
   }
 
@@ -115,9 +134,14 @@ export class DeliveriesController {
       'idempotente: si el pedido ya estaba entregado devuelve la entrega previa con ' +
       '`alreadyDelivered: true`.',
   })
-  @ApiParam({ name: 'orderId', description: 'Id del pedido.', example: 'ord_123' })
+  @ApiParam({
+    name: 'orderId',
+    description: 'Id del pedido.',
+    example: 'ord_123',
+  })
   @ApiOkResponse({
-    description: 'Entrega manual registrada (o entrega previa si el pedido ya estaba entregado).',
+    description:
+      'Entrega manual registrada (o entrega previa si el pedido ya estaba entregado).',
     type: DeliveryResponseDto,
     content: {
       'application/json': {
@@ -154,9 +178,15 @@ export class DeliveriesController {
       },
     },
   })
-  @ApiBadRequestResponse({ description: 'Falta el motivo u otro campo inválido.' })
-  @ApiUnauthorizedResponse({ description: 'Falta el header de sesión del gateway.' })
-  @ApiForbiddenResponse({ description: 'El usuario no tiene acceso a la tienda del pedido.' })
+  @ApiBadRequestResponse({
+    description: 'Falta el motivo u otro campo inválido.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Falta el header de sesión del gateway.',
+  })
+  @ApiForbiddenResponse({
+    description: 'El usuario no tiene acceso a la tienda del pedido.',
+  })
   @ApiNotFoundResponse({ description: 'El pedido no existe para Fulfillment.' })
   async manualDelivery(
     @Param('orderId') orderId: string,
@@ -164,12 +194,13 @@ export class DeliveriesController {
     @CurrentUser('userId') sellerUserId: string,
     @CorrelationId() correlationId?: string,
   ): Promise<DeliveryResponseDto> {
-    const { delivery, alreadyDelivered } = await this.deliveriesService.registerManualDelivery(
-      orderId,
-      sellerUserId,
-      dto,
-      correlationId,
-    );
+    const { delivery, alreadyDelivered } =
+      await this.deliveriesService.registerManualDelivery(
+        orderId,
+        sellerUserId,
+        dto,
+        correlationId,
+      );
     return DeliveryResponseDto.from(delivery, alreadyDelivered);
   }
 
@@ -183,11 +214,24 @@ export class DeliveriesController {
       'acceso a la tienda del pedido. Si el motivo es `OTHER`, la nota es obligatoria. Publica ' +
       '`delivery.failed`. No marca el código como usado.',
   })
-  @ApiParam({ name: 'orderId', description: 'Id del pedido.', example: 'ord_123' })
-  @ApiOkResponse({ description: 'Entrega fallida registrada.', type: DeliveryResponseDto })
-  @ApiBadRequestResponse({ description: 'Motivo inválido o falta la nota cuando es OTHER.' })
-  @ApiUnauthorizedResponse({ description: 'Falta el header de sesión del gateway.' })
-  @ApiForbiddenResponse({ description: 'El usuario no tiene acceso a la tienda del pedido.' })
+  @ApiParam({
+    name: 'orderId',
+    description: 'Id del pedido.',
+    example: 'ord_123',
+  })
+  @ApiOkResponse({
+    description: 'Entrega fallida registrada.',
+    type: DeliveryResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description: 'Motivo inválido o falta la nota cuando es OTHER.',
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Falta el header de sesión del gateway.',
+  })
+  @ApiForbiddenResponse({
+    description: 'El usuario no tiene acceso a la tienda del pedido.',
+  })
   @ApiNotFoundResponse({ description: 'El pedido no existe para Fulfillment.' })
   async deliveryFailure(
     @Param('orderId') orderId: string,
@@ -213,10 +257,21 @@ export class DeliveriesController {
       'si fue usado, método de entrega, y el último fallo registrado. Lo puede ver el comprador ' +
       'dueño, el owner/staff de la tienda o un ADMIN.',
   })
-  @ApiParam({ name: 'orderId', description: 'Id del pedido.', example: 'ord_123' })
-  @ApiOkResponse({ description: 'Estado de fulfillment del pedido.', type: FulfillmentStatusDto })
-  @ApiUnauthorizedResponse({ description: 'Falta el header de sesión del gateway.' })
-  @ApiForbiddenResponse({ description: 'El usuario no puede ver el estado de este pedido.' })
+  @ApiParam({
+    name: 'orderId',
+    description: 'Id del pedido.',
+    example: 'ord_123',
+  })
+  @ApiOkResponse({
+    description: 'Estado de fulfillment del pedido.',
+    type: FulfillmentStatusDto,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Falta el header de sesión del gateway.',
+  })
+  @ApiForbiddenResponse({
+    description: 'El usuario no puede ver el estado de este pedido.',
+  })
   @ApiNotFoundResponse({ description: 'El pedido no existe para Fulfillment.' })
   getStatus(
     @Param('orderId') orderId: string,
@@ -234,17 +289,33 @@ export class DeliveriesController {
       'vendedor) y orden por fecha. Restringido a usuarios con acceso a la tienda (owner/staff ' +
       'o ADMIN).',
   })
-  @ApiParam({ name: 'storeId', description: 'Id de la tienda.', example: 'str_9' })
-  @ApiOkResponse({ description: 'Historial paginado de entregas.', type: PaginatedDeliveriesDto })
-  @ApiUnauthorizedResponse({ description: 'Falta el header de sesión del gateway.' })
-  @ApiForbiddenResponse({ description: 'El usuario no tiene acceso a la tienda.' })
+  @ApiParam({
+    name: 'storeId',
+    description: 'Id de la tienda.',
+    example: 'str_9',
+  })
+  @ApiOkResponse({
+    description: 'Historial paginado de entregas.',
+    type: PaginatedDeliveriesDto,
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Falta el header de sesión del gateway.',
+  })
+  @ApiForbiddenResponse({
+    description: 'El usuario no tiene acceso a la tienda.',
+  })
   async listStoreDeliveries(
     @Param('storeId') storeId: string,
     @Query() query: DeliveryListQueryDto,
   ): Promise<PaginatedDeliveriesDto> {
-    const result = await this.deliveriesService.listStoreDeliveries(storeId, query);
+    const result = await this.deliveriesService.listStoreDeliveries(
+      storeId,
+      query,
+    );
     return {
-      data: result.data.map((d) => DeliveryResponseDto.from(d)),
+      data: result.data.map(({ delivery, orderNumber, confirmedByUserName }) =>
+        DeliveryResponseDto.from(delivery, false, orderNumber, confirmedByUserName),
+      ),
       total: result.total,
       page: result.page,
       limit: result.limit,
