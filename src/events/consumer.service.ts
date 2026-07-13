@@ -103,6 +103,7 @@ export class ConsumerService
   ): Promise<void> {
     if (
       routingKey === ORDER_ROUTING_KEYS.confirmed ||
+      routingKey === ORDER_ROUTING_KEYS.readyForPickup ||
       routingKey === ORDER_ROUTING_KEYS.cancelled
     ) {
       return this.orderHandler.handle(routingKey, event);
