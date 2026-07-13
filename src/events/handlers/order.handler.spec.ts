@@ -53,7 +53,7 @@ function build() {
 }
 
 describe('OrderHandler', () => {
-  it('confirmed: proyecta el pedido y genera el código (UC-01)', async () => {
+  it('confirmed: proyecta el pedido sin generar el código aún', async () => {
     const { handler, orderProjection, codesService, idempotency } = build();
 
     await handler.handle(ORDER_ROUTING_KEYS.confirmed, {
@@ -73,19 +73,66 @@ describe('OrderHandler', () => {
       }),
       expect.anything(),
     );
+    // El QR ya no se genera al confirmar: se genera al marcar READY_FOR_PICKUP.
+    expect(codesService.generateForOrder).not.toHaveBeenCalled();
+    expect(idempotency.markProcessed).toHaveBeenCalledWith(
+      expect.anything(),
+      'idem-1',
+      ORDER_ROUTING_KEYS.confirmed,
+    );
+  });
+
+  it('ready_for_pickup: invalida el código previo y genera el nuevo (UC-01)', async () => {
+    const { handler, orderProjection, codesService, idempotency } = build();
+
+    await handler.handle(ORDER_ROUTING_KEYS.readyForPickup, {
+      orderId: 'ord-1',
+      orderNumber: 'OC-20260713-6632',
+      buyerId: 'buyer-1',
+      storeId: 'str-1',
+      pickupExpiresAt: '2026-07-01T12:00:00.000Z',
+      idempotencyKey: 'idem-1',
+    });
+
+    expect(orderProjection.upsertFromConfirmed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderId: 'ord-1',
+        orderNumber: 'OC-20260713-6632',
+        pickupExpiresAt: new Date('2026-07-01T12:00:00.000Z'),
+      }),
+      expect.anything(),
+    );
+    expect(codesService.invalidateByOrder).toHaveBeenCalledWith(
+      expect.anything(),
+      'ord-1',
+    );
     expect(codesService.generateForOrder).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         orderId: 'ord-1',
         buyerId: 'buyer-1',
         storeId: 'str-1',
+        pickupExpiresAt: new Date('2026-07-01T12:00:00.000Z'),
       }),
     );
     expect(idempotency.markProcessed).toHaveBeenCalledWith(
       expect.anything(),
       'idem-1',
-      ORDER_ROUTING_KEYS.confirmed,
+      ORDER_ROUTING_KEYS.readyForPickup,
     );
+  });
+
+  it('ready_for_pickup incompleto: no invalida ni genera código', async () => {
+    const { handler, codesService } = build();
+
+    await expect(
+      handler.handle(ORDER_ROUTING_KEYS.readyForPickup, {
+        orderId: 'ord-1',
+        idempotencyKey: 'x',
+      }),
+    ).resolves.toBeUndefined();
+    expect(codesService.invalidateByOrder).not.toHaveBeenCalled();
+    expect(codesService.generateForOrder).not.toHaveBeenCalled();
   });
 
   it('cancelled: marca cancelado e invalida el código (UC-08)', async () => {
@@ -161,7 +208,7 @@ describe('OrderHandler', () => {
   it('usa el fallback de expiración cuando pickupExpiresAt no viene', async () => {
     const { handler, codesService } = build();
 
-    await handler.handle(ORDER_ROUTING_KEYS.confirmed, {
+    await handler.handle(ORDER_ROUTING_KEYS.readyForPickup, {
       orderId: 'ord-1',
       buyerId: 'b',
       storeId: 's',
