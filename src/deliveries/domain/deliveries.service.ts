@@ -13,7 +13,12 @@ import { CodesService } from '../../codes/domain/codes.service';
 import { ValidationError } from '../../codes/domain/pickup-code.types';
 import { CodesRepository } from '../../codes/infra/codes.repository';
 import { CurrentUserData } from '../../common/decorators/current-user.decorator';
-import { AuditAction, DeliveryFailureReason, DeliveryMethod, PickupCodeStatus } from '../../common/enums';
+import {
+  AuditAction,
+  DeliveryFailureReason,
+  DeliveryMethod,
+  PickupCodeStatus,
+} from '../../common/enums';
 import { DeliveryEntity } from '../../database/entities/delivery.entity';
 import { OrderProjectionService } from '../../events/projections/order-projection.service';
 import { StoreStaffProjectionService } from '../../events/projections/store-staff-projection.service';
@@ -64,9 +69,21 @@ export interface ListStoreDeliveriesInput {
 /** Estado del proceso de retiro de un pedido (UC-09), objeto de dominio plano. */
 export interface FulfillmentStatusResult {
   orderId: string;
-  code: { status: PickupCodeStatus; expiresAt: Date; usedAt: Date | null } | null;
-  delivery: { method: DeliveryMethod; deliveredAt: Date; confirmedByUserId: string } | null;
-  failure: { reason: DeliveryFailureReason; occurredAt: Date; note: string | null } | null;
+  code: {
+    status: PickupCodeStatus;
+    expiresAt: Date;
+    usedAt: Date | null;
+  } | null;
+  delivery: {
+    method: DeliveryMethod;
+    deliveredAt: Date;
+    confirmedByUserId: string;
+  } | null;
+  failure: {
+    reason: DeliveryFailureReason;
+    occurredAt: Date;
+    note: string | null;
+  } | null;
 }
 
 /**
@@ -101,7 +118,10 @@ export class DeliveriesService {
     sellerUserId: string,
     correlationId?: string,
   ): Promise<DeliveryResult> {
-    const { code: found, error } = await this.codesService.resolveForValidation(code, sellerUserId);
+    const { code: found, error } = await this.codesService.resolveForValidation(
+      code,
+      sellerUserId,
+    );
 
     if (!found) {
       throw new NotFoundException({
@@ -119,7 +139,9 @@ export class DeliveriesService {
       // Idempotencia ante doble confirmación (RN-10): si el código ya estaba USED y existe
       // una entrega exitosa, la devolvemos marcada como `alreadyDelivered` para que el front
       // advierta que ya se entregó; si no hay entrega, sí es un conflicto real.
-      const existing = await this.deliveriesRepo.findSuccessfulByOrderId(found.orderId);
+      const existing = await this.deliveriesRepo.findSuccessfulByOrderId(
+        found.orderId,
+      );
       if (existing) {
         return { delivery: existing, alreadyDelivered: true };
       }
@@ -137,7 +159,8 @@ export class DeliveriesService {
     if (error === ValidationError.CODE_INVALIDATED) {
       throw new ConflictException({
         code: 'CODE_INVALIDATED',
-        message: 'Este código de retiro fue anulado porque el pedido se canceló.',
+        message:
+          'Este código de retiro fue anulado porque el pedido se canceló.',
       });
     }
 
@@ -208,11 +231,16 @@ export class DeliveriesService {
     }
 
     return this.dataSource.transaction(async (manager) => {
-      const activeCode = await this.codesRepo.findActiveByOrderId(orderId, manager);
+      const activeCode = await this.codesRepo.findActiveByOrderId(
+        orderId,
+        manager,
+      );
       if (activeCode) {
         await this.codesService.markUsed(manager, activeCode.id);
       }
-      const note = input.note ? `${input.reason} — ${input.note}` : input.reason;
+      const note = input.note
+        ? `${input.reason} — ${input.note}`
+        : input.reason;
       const delivery = await this.deliveriesRepo.create(
         {
           orderId,
@@ -266,15 +294,18 @@ export class DeliveriesService {
     if (projection.status === 'cancelled') {
       throw new ConflictException({
         code: 'ORDER_CANCELLED',
-        message: 'Este pedido fue cancelado; no se puede registrar una entrega fallida.',
+        message:
+          'Este pedido fue cancelado; no se puede registrar una entrega fallida.',
       });
     }
-    const alreadyDelivered = await this.deliveriesRepo.findSuccessfulByOrderId(orderId);
+    const alreadyDelivered =
+      await this.deliveriesRepo.findSuccessfulByOrderId(orderId);
     if (alreadyDelivered) {
       // No tiene sentido marcar como fallido un pedido que ya se entregó (registro contradictorio).
       throw new ConflictException({
         code: 'ALREADY_DELIVERED',
-        message: 'Este pedido ya fue entregado; no se puede marcarlo como fallido.',
+        message:
+          'Este pedido ya fue entregado; no se puede marcarlo como fallido.',
       });
     }
     if (input.reason === DeliveryFailureReason.OTHER && !input.note) {
@@ -301,7 +332,11 @@ export class DeliveriesService {
         aggregateType: 'Delivery',
         eventType: 'delivery.failed',
         routingKey: 'fulfillment.delivery.failed',
-        business: { orderId, buyerId: projection.buyerId, reason: input.reason },
+        business: {
+          orderId,
+          buyerId: projection.buyerId,
+          reason: input.reason,
+        },
         correlationId,
       });
       await this.audit.record(
@@ -348,7 +383,11 @@ export class DeliveriesService {
     return {
       orderId,
       code: code
-        ? { status: code.status, expiresAt: code.expiresAt, usedAt: code.usedAt }
+        ? {
+            status: code.status,
+            expiresAt: code.expiresAt,
+            usedAt: code.usedAt,
+          }
         : null,
       delivery: successful?.method
         ? {
@@ -358,7 +397,11 @@ export class DeliveriesService {
           }
         : null,
       failure: failure?.failureReason
-        ? { reason: failure.failureReason, occurredAt: failure.deliveredAt, note: failure.note }
+        ? {
+            reason: failure.failureReason,
+            occurredAt: failure.deliveredAt,
+            note: failure.note,
+          }
         : null,
     };
   }
@@ -367,7 +410,16 @@ export class DeliveriesService {
   async listStoreDeliveries(
     storeId: string,
     input: ListStoreDeliveriesInput,
-  ): Promise<{ data: DeliveryEntity[]; total: number; page: number; limit: number }> {
+  ): Promise<{
+    data: Array<{
+      delivery: DeliveryEntity;
+      orderNumber: string | null;
+      confirmedByUserName: string | null;
+    }>;
+    total: number;
+    page: number;
+    limit: number;
+  }> {
     const { data, total } = await this.deliveriesRepo.listByStore(storeId, {
       page: input.page,
       limit: input.limit,
@@ -377,7 +429,19 @@ export class DeliveriesService {
       from: input.from ? new Date(input.from) : null,
       to: input.to ? new Date(input.to) : null,
     });
-    return { data, total, page: input.page, limit: input.limit };
+    const enriched = await Promise.all(
+      data.map(async (delivery) => {
+        const projection = await this.orderProjection.getByOrderId(
+          delivery.orderId,
+        );
+        const confirmedByUserName = await this.storeStaff.getUserName(
+          delivery.storeId,
+          delivery.confirmedByUserId,
+        );
+        return { delivery, orderNumber: projection?.orderNumber ?? null, confirmedByUserName };
+      }),
+    );
+    return { data: enriched, total, page: input.page, limit: input.limit };
   }
 
   private async assertCanViewStatus(

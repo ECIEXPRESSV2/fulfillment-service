@@ -33,7 +33,10 @@ export class OrderHandler {
 
   async handle(routingKey: string, event: EventRecord): Promise<void> {
     const idempotencyKey = this.str(event.idempotencyKey);
-    if (idempotencyKey && (await this.idempotency.isProcessed(idempotencyKey))) {
+    if (
+      idempotencyKey &&
+      (await this.idempotency.isProcessed(idempotencyKey))
+    ) {
       return;
     }
 
@@ -47,11 +50,18 @@ export class OrderHandler {
             await this.onCancelled(event, manager);
             break;
           default:
-            this.logger.debug({ routingKey }, 'Evento de Order ignorado (no aplica)');
+            this.logger.debug(
+              { routingKey },
+              'Evento de Order ignorado (no aplica)',
+            );
             return;
         }
         if (idempotencyKey) {
-          await this.idempotency.markProcessed(manager, idempotencyKey, routingKey);
+          await this.idempotency.markProcessed(
+            manager,
+            idempotencyKey,
+            routingKey,
+          );
         }
       });
     } catch (error) {
@@ -63,17 +73,27 @@ export class OrderHandler {
   }
 
   /** UC-01: proyecta el pedido y genera su código de retiro. */
-  private async onConfirmed(event: EventRecord, manager: EntityManager): Promise<void> {
+  private async onConfirmed(
+    event: EventRecord,
+    manager: EntityManager,
+  ): Promise<void> {
     const orderId = this.str(event.orderId);
+    const orderNumber = this.str(event.orderNumber);
     const buyerId = this.str(event.buyerId);
     const storeId = this.str(event.storeId);
     if (!orderId || !buyerId || !storeId) {
-      this.logger.warn({ event }, 'order.order.confirmed incompleto; se ignora');
+      this.logger.warn(
+        { event },
+        'order.order.confirmed incompleto; se ignora',
+      );
       return;
     }
     const pickupExpiresAt = this.date(event.pickupExpiresAt);
 
-    await this.orderProjection.upsertFromConfirmed({ orderId, buyerId, storeId, pickupExpiresAt }, manager);
+    await this.orderProjection.upsertFromConfirmed(
+      { orderId, orderNumber, buyerId, storeId, pickupExpiresAt },
+      manager,
+    );
     await this.codesService.generateForOrder(manager, {
       orderId,
       buyerId,
@@ -84,15 +104,22 @@ export class OrderHandler {
   }
 
   /** UC-08: marca el pedido cancelado e invalida su código `ACTIVE`. */
-  private async onCancelled(event: EventRecord, manager: EntityManager): Promise<void> {
+  private async onCancelled(
+    event: EventRecord,
+    manager: EntityManager,
+  ): Promise<void> {
     const orderId = this.str(event.orderId);
     if (!orderId) {
-      this.logger.warn({ event }, 'order.order.cancelled sin orderId; se ignora');
+      this.logger.warn(
+        { event },
+        'order.order.cancelled sin orderId; se ignora',
+      );
       return;
     }
 
     await this.orderProjection.markCancelled(orderId, manager);
-    const { invalidated, alreadyDelivered } = await this.codesService.invalidateByOrder(manager, orderId);
+    const { invalidated, alreadyDelivered } =
+      await this.codesService.invalidateByOrder(manager, orderId);
     const correlationId = this.str(event.correlationId);
 
     if (invalidated) {

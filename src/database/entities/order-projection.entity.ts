@@ -11,6 +11,9 @@ export class OrderProjectionEntity {
   @PrimaryColumn({ name: 'order_id' })
   orderId: string;
 
+  @Column({ name: 'order_number', type: 'text', nullable: true })
+  orderNumber: string | null;
+
   @Column({ name: 'buyer_id' })
   buyerId: string;
 

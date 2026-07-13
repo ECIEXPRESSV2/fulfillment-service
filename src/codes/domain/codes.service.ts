@@ -14,6 +14,7 @@ import { AuditAction, PickupCodeStatus } from '../../common/enums';
 import { PickupCodeEntity } from '../../database/entities/pickup-code.entity';
 import { StoreStaffProjectionService } from '../../events/projections/store-staff-projection.service';
 import { OutboxService } from '../../outbox/outbox.service';
+import { OrderProjectionService } from '../../events/projections/order-projection.service';
 import { BlobStorageService } from '../../storage/blob-storage.service';
 import { QrService } from '../../qr/domain/qr.service';
 import { CodesRepository } from '../infra/codes.repository';
@@ -68,14 +69,19 @@ export class CodesService {
     private readonly outbox: OutboxService,
     private readonly storeStaff: StoreStaffProjectionService,
     private readonly rateLimiter: ShortCodeRateLimiter,
+    private readonly orderProjection: OrderProjectionService,
     private readonly audit: AuditService,
     private readonly qr: QrService,
     private readonly blob: BlobStorageService,
     config: ConfigService<EnvironmentVariables, true>,
   ) {
-    this.fallbackExpiryHours = config.get('PICKUP_CODE_FALLBACK_EXPIRY_HOURS', { infer: true });
+    this.fallbackExpiryHours = config.get('PICKUP_CODE_FALLBACK_EXPIRY_HOURS', {
+      infer: true,
+    });
     this.publicBaseUrl = config.get('PUBLIC_BASE_URL', { infer: true });
-    this.qrContainer = config.get('AZURE_STORAGE_QR_CONTAINER', { infer: true });
+    this.qrContainer = config.get('AZURE_STORAGE_QR_CONTAINER', {
+      infer: true,
+    });
     this.qrSasTtlHours = config.get('QR_SAS_TTL_HOURS', { infer: true });
   }
 
@@ -88,7 +94,10 @@ export class CodesService {
     manager: EntityManager,
     input: GenerateCodeInput,
   ): Promise<{ created: boolean; code: PickupCodeEntity }> {
-    const existing = await this.repo.findActiveByOrderId(input.orderId, manager);
+    const existing = await this.repo.findActiveByOrderId(
+      input.orderId,
+      manager,
+    );
     if (existing) {
       return { created: false, code: existing };
     }
@@ -112,7 +121,11 @@ export class CodesService {
     // Sube el PNG del QR al blob privado y firma su SAS de lectura. Notification lo manda como
     // imagen por WhatsApp (Meta descarga la URL). Si el blob no está configurado o falla, se cae
     // al endpoint público de fallback para no bloquear la confirmación del pedido.
-    const qrImageUrl = await this.buildQrImageUrl(input.orderId, token, expiresAt);
+    const qrImageUrl = await this.buildQrImageUrl(
+      input.orderId,
+      token,
+      expiresAt,
+    );
 
     // Log de confirmación de versión + origen de la imagen (blob vs fallback). Sirve para
     // verificar tras un redeploy que corre el build final y para diagnosticar la entrega
@@ -157,11 +170,23 @@ export class CodesService {
    * La autorización de tienda se resuelve aquí (`WRONG_STORE`), no por guard. El código corto
    * pasa por rate-limit (RN-11).
    */
-  async validateCode(code: string, sellerUserId: string): Promise<ValidationResult> {
-    const { code: found, error } = await this.resolveForValidation(code, sellerUserId);
+  async validateCode(
+    code: string,
+    sellerUserId: string,
+  ): Promise<ValidationResult> {
+    const { code: found, error } = await this.resolveForValidation(
+      code,
+      sellerUserId,
+    );
+    const projection = found
+      ? await this.orderProjection.getByOrderId(found.orderId)
+      : null;
     const result: ValidationResult =
       error !== null || found === null
-        ? { valid: false, validationError: error ?? ValidationError.CODE_NOT_FOUND }
+        ? {
+            valid: false,
+            validationError: error ?? ValidationError.CODE_NOT_FOUND,
+          }
         : {
             valid: true,
             order: {
@@ -169,6 +194,7 @@ export class CodesService {
               buyerId: found.buyerId,
               storeId: found.storeId,
               expiresAt: found.expiresAt,
+              orderNumber: projection?.orderNumber ?? found.orderId,
             },
           };
 
@@ -178,7 +204,10 @@ export class CodesService {
       actorId: sellerUserId,
       orderId: found?.orderId,
       pickupCodeId: found?.id,
-      metadata: { valid: result.valid, validationError: result.valid ? null : result.validationError },
+      metadata: {
+        valid: result.valid,
+        validationError: result.valid ? null : result.validationError,
+      },
     });
 
     return result;
@@ -200,7 +229,8 @@ export class CodesService {
       throw new HttpException(
         {
           code: 'RATE_LIMITED',
-          message: 'Demasiados intentos con este código. Espera un momento e inténtalo de nuevo.',
+          message:
+            'Demasiados intentos con este código. Espera un momento e inténtalo de nuevo.',
         },
         HttpStatus.TOO_MANY_REQUESTS,
       );
@@ -211,7 +241,10 @@ export class CodesService {
       return { code: null, error: ValidationError.CODE_NOT_FOUND };
     }
 
-    const authorized = await this.storeStaff.isAuthorized(found.storeId, sellerUserId);
+    const authorized = await this.storeStaff.isAuthorized(
+      found.storeId,
+      sellerUserId,
+    );
     if (!authorized) {
       return { code: found, error: ValidationError.WRONG_STORE };
     }
@@ -225,7 +258,10 @@ export class CodesService {
   }
 
   /** UC-02: el comprador consulta el código de su pedido. */
-  async getCodeForBuyer(orderId: string, buyerUserId: string): Promise<PickupCodeView> {
+  async getCodeForBuyer(
+    orderId: string,
+    buyerUserId: string,
+  ): Promise<PickupCodeView> {
     const code = await this.repo.findLatestByOrderId(orderId);
     if (!code) {
       throw new NotFoundException({
@@ -267,7 +303,10 @@ export class CodesService {
     // No había código ACTIVE. Si el último ya estaba USED, el pedido se entregó: la
     // cancelación llega tarde y no se revierte (RN-15); el handler lo audita.
     const latest = await this.repo.findLatestByOrderId(orderId);
-    return { invalidated: false, alreadyDelivered: latest?.status === PickupCodeStatus.USED };
+    return {
+      invalidated: false,
+      alreadyDelivered: latest?.status === PickupCodeStatus.USED,
+    };
   }
 
   /** Devuelve el primer error de estado del código, o `null` si es válido. */
@@ -278,7 +317,10 @@ export class CodesService {
     if (code.status === PickupCodeStatus.USED) {
       return ValidationError.CODE_ALREADY_USED;
     }
-    if (code.status === PickupCodeStatus.EXPIRED || code.expiresAt.getTime() <= Date.now()) {
+    if (
+      code.status === PickupCodeStatus.EXPIRED ||
+      code.expiresAt.getTime() <= Date.now()
+    ) {
       return ValidationError.CODE_EXPIRED;
     }
     return null;
@@ -301,7 +343,11 @@ export class CodesService {
    * que falte para que el código expire, más una holgura. Ante blob deshabilitado o error, cae al
    * endpoint público (`/fulfillment/qr/:token.png`) para no romper el flujo de confirmación.
    */
-  private async buildQrImageUrl(orderId: string, token: string, expiresAt: Date): Promise<string> {
+  private async buildQrImageUrl(
+    orderId: string,
+    token: string,
+    expiresAt: Date,
+  ): Promise<string> {
     if (!this.blob.enabled) {
       // Rama silenciosa histórica: sin este log no había forma de distinguir "blob
       // deshabilitado" de "subida fallida". AZURE_STORAGE_ACCOUNT vacío cae aquí.
@@ -312,8 +358,13 @@ export class CodesService {
     }
     try {
       const png = await this.qr.generatePng(token);
-      const minutesUntilExpiry = Math.ceil((expiresAt.getTime() - Date.now()) / 60_000);
-      const ttlMinutes = Math.max(this.qrSasTtlHours * 60, minutesUntilExpiry + 120);
+      const minutesUntilExpiry = Math.ceil(
+        (expiresAt.getTime() - Date.now()) / 60_000,
+      );
+      const ttlMinutes = Math.max(
+        this.qrSasTtlHours * 60,
+        minutesUntilExpiry + 120,
+      );
       const url = await this.blob.uploadWithReadSas({
         container: this.qrContainer,
         blobName: `${orderId}/${token}.png`,

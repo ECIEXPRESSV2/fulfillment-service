@@ -59,18 +59,18 @@ describe('StoreStaffProjectionService', () => {
 
   it('upsertOwner registra al dueño con rol OWNER', async () => {
     const { service, repo } = build();
-    await service.upsertOwner('s1', 'owner-1');
+    await service.upsertOwner('s1', 'owner-1', 'Andrea Ruiz');
     expect(repo.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ storeId: 's1', userId: 'owner-1', role: StoreStaffRole.OWNER, isActive: true }),
+      expect.objectContaining({ storeId: 's1', userId: 'owner-1', userName: 'Andrea Ruiz', role: StoreStaffRole.OWNER, isActive: true }),
       expect.objectContaining({ conflictPaths: ['storeId', 'userId'] }),
     );
   });
 
   it('assignStaff registra colaborador activo con rol STAFF', async () => {
     const { service, repo } = build();
-    await service.assignStaff('s1', 'u1');
+    await service.assignStaff('s1', 'u1', 'Laura Gomez');
     expect(repo.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({ role: StoreStaffRole.STAFF, isActive: true }),
+      expect.objectContaining({ userName: 'Laura Gomez', role: StoreStaffRole.STAFF, isActive: true }),
       expect.anything(),
     );
   });

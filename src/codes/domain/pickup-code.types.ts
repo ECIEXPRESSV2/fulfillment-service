@@ -13,6 +13,7 @@ export enum ValidationError {
 /** Datos del pedido que se devuelven cuando el código es válido. */
 export interface ValidatedOrder {
   orderId: string;
+  orderNumber: string;
   buyerId: string;
   storeId: string;
   expiresAt: Date;

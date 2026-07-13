@@ -3,6 +3,7 @@ import { EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { PickupCodeStatus } from '../common/enums';
 import { PickupCodeEntity } from '../database/entities/pickup-code.entity';
+import { OrderProjectionService } from '../events/projections/order-projection.service';
 import { StoreStaffProjectionService } from '../events/projections/store-staff-projection.service';
 import { OutboxService } from '../outbox/outbox.service';
 import { BlobStorageService } from '../storage/blob-storage.service';
@@ -16,7 +17,9 @@ const FALLBACK_HOURS = 8;
 const BASE_URL = 'http://localhost:3005';
 const tx = {} as EntityManager;
 
-function buildCode(overrides: Partial<PickupCodeEntity> = {}): PickupCodeEntity {
+function buildCode(
+  overrides: Partial<PickupCodeEntity> = {},
+): PickupCodeEntity {
   return {
     id: 'code-1',
     orderId: 'ord-1',
@@ -42,13 +45,25 @@ function build(blobOverride: Record<string, unknown> = {}) {
     invalidateActiveByOrderId: jest.fn(),
   } as unknown as jest.Mocked<CodesRepository>;
 
-  const outbox = { enqueue: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<OutboxService>;
-  const storeStaff = { isAuthorized: jest.fn().mockResolvedValue(true) } as unknown as jest.Mocked<StoreStaffProjectionService>;
-  const rateLimiter = { consume: jest.fn().mockReturnValue(true) } as unknown as jest.Mocked<ShortCodeRateLimiter>;
+  const outbox = {
+    enqueue: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<OutboxService>;
+  const storeStaff = {
+    isAuthorized: jest.fn().mockResolvedValue(true),
+  } as unknown as jest.Mocked<StoreStaffProjectionService>;
+  const rateLimiter = {
+    consume: jest.fn().mockReturnValue(true),
+  } as unknown as jest.Mocked<ShortCodeRateLimiter>;
   const audit = {
     record: jest.fn().mockResolvedValue(undefined),
     safeRecord: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<AuditService>;
+  const orderProjection = {
+    getByOrderId: jest
+      .fn()
+      .mockResolvedValue({ orderNumber: 'OC-20260713-6632' }),
+  } as unknown as jest.Mocked<OrderProjectionService>;
+
   const config = {
     get: (key: string) => {
       if (key === 'PICKUP_CODE_FALLBACK_EXPIRY_HOURS') return FALLBACK_HOURS;
@@ -69,7 +84,17 @@ function build(blobOverride: Record<string, unknown> = {}) {
     ...blobOverride,
   } as unknown as jest.Mocked<BlobStorageService>;
 
-  const service = new CodesService(repo, outbox, storeStaff, rateLimiter, audit, qr, blob, config);
+  const service = new CodesService(
+    repo,
+    outbox,
+    storeStaff,
+    rateLimiter,
+    orderProjection,
+    audit,
+    qr,
+    blob,
+    config,
+  );
   return { service, repo, outbox, storeStaff, rateLimiter, audit, qr, blob };
 }
 
@@ -102,12 +127,18 @@ describe('CodesService', () => {
     it('con blob habilitado sube el QR y publica la SAS URL como imageUrl', async () => {
       const { service, repo, outbox, qr } = build({
         enabled: true,
-        uploadWithReadSas: jest.fn().mockResolvedValue('https://blob/qr.png?sig=abc'),
+        uploadWithReadSas: jest
+          .fn()
+          .mockResolvedValue('https://blob/qr.png?sig=abc'),
       });
       repo.findActiveByOrderId.mockResolvedValue(null);
       repo.create.mockResolvedValue(buildCode());
 
-      await service.generateForOrder(tx, { orderId: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1' });
+      await service.generateForOrder(tx, {
+        orderId: 'ord-1',
+        buyerId: 'buyer-1',
+        storeId: 'str-1',
+      });
 
       expect(qr.generatePng).toHaveBeenCalled();
       expect(outbox.enqueue).toHaveBeenCalledWith(
@@ -166,12 +197,18 @@ describe('CodesService', () => {
       repo.findActiveByOrderId.mockResolvedValue(null);
       repo.create.mockResolvedValue(buildCode());
 
-      await service.generateForOrder(tx, { orderId: 'ord-1', buyerId: 'b', storeId: 's' });
+      await service.generateForOrder(tx, {
+        orderId: 'ord-1',
+        buyerId: 'b',
+        storeId: 's',
+      });
 
       // repo.create(data, manager): primer argumento es data
       const data = repo.create.mock.calls[0][0] as { expiresAt: Date };
       const expectedMs = Date.now() + FALLBACK_HOURS * 3600 * 1000;
-      expect(Math.abs(data.expiresAt.getTime() - expectedMs)).toBeLessThan(5000);
+      expect(Math.abs(data.expiresAt.getTime() - expectedMs)).toBeLessThan(
+        5000,
+      );
     });
 
     it('respeta pickupExpiresAt cuando viene en el evento', async () => {
@@ -198,7 +235,10 @@ describe('CodesService', () => {
       repo.findByTokenOrShortCode.mockResolvedValue(null);
 
       const result = await service.validateCode('opaque-token', 'seller-1');
-      expect(result).toEqual({ valid: false, validationError: ValidationError.CODE_NOT_FOUND });
+      expect(result).toEqual({
+        valid: false,
+        validationError: ValidationError.CODE_NOT_FOUND,
+      });
     });
 
     it('WRONG_STORE cuando el vendedor no pertenece a la tienda', async () => {
@@ -207,7 +247,10 @@ describe('CodesService', () => {
       storeStaff.isAuthorized.mockResolvedValue(false);
 
       const result = await service.validateCode('opaque-token', 'seller-x');
-      expect(result).toEqual({ valid: false, validationError: ValidationError.WRONG_STORE });
+      expect(result).toEqual({
+        valid: false,
+        validationError: ValidationError.WRONG_STORE,
+      });
     });
 
     it.each([
@@ -229,7 +272,10 @@ describe('CodesService', () => {
       );
 
       const result = await service.validateCode('opaque-token', 'seller-1');
-      expect(result).toEqual({ valid: false, validationError: ValidationError.CODE_EXPIRED });
+      expect(result).toEqual({
+        valid: false,
+        validationError: ValidationError.CODE_EXPIRED,
+      });
     });
 
     it('valid:true con datos del pedido para un código ACTIVE vigente de su tienda', async () => {
@@ -247,7 +293,9 @@ describe('CodesService', () => {
       const { service, rateLimiter } = build();
       rateLimiter.consume.mockReturnValue(false);
 
-      await expect(service.validateCode('A7K9-P2MX', 'seller-1')).rejects.toMatchObject({
+      await expect(
+        service.validateCode('A7K9-P2MX', 'seller-1'),
+      ).rejects.toMatchObject({
         response: { code: 'RATE_LIMITED' },
       });
     });
@@ -257,15 +305,21 @@ describe('CodesService', () => {
     it('404 cuando el pedido no tiene código', async () => {
       const { service, repo } = build();
       repo.findLatestByOrderId.mockResolvedValue(null);
-      await expect(service.getCodeForBuyer('ord-1', 'buyer-1')).rejects.toMatchObject({
+      await expect(
+        service.getCodeForBuyer('ord-1', 'buyer-1'),
+      ).rejects.toMatchObject({
         response: { code: 'CODE_NOT_FOUND' },
       });
     });
 
     it('403 cuando quien consulta no es el dueño', async () => {
       const { service, repo } = build();
-      repo.findLatestByOrderId.mockResolvedValue(buildCode({ buyerId: 'otro' }));
-      await expect(service.getCodeForBuyer('ord-1', 'buyer-1')).rejects.toMatchObject({
+      repo.findLatestByOrderId.mockResolvedValue(
+        buildCode({ buyerId: 'otro' }),
+      );
+      await expect(
+        service.getCodeForBuyer('ord-1', 'buyer-1'),
+      ).rejects.toMatchObject({
         response: { code: 'NOT_ORDER_OWNER' },
       });
     });
@@ -302,7 +356,9 @@ describe('CodesService', () => {
     it('alreadyDelivered:true cuando el código ya estaba USED (cancelación tardía, RN-15)', async () => {
       const { service, repo } = build();
       repo.invalidateActiveByOrderId.mockResolvedValue(0);
-      repo.findLatestByOrderId.mockResolvedValue(buildCode({ status: PickupCodeStatus.USED }));
+      repo.findLatestByOrderId.mockResolvedValue(
+        buildCode({ status: PickupCodeStatus.USED }),
+      );
       expect(await service.invalidateByOrder(tx, 'ord-1')).toEqual({
         invalidated: false,
         alreadyDelivered: true,
