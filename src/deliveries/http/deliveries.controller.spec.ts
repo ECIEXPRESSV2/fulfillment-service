@@ -4,7 +4,9 @@ import { CurrentUserData } from '../../common/decorators/current-user.decorator'
 import { DeliveriesService } from '../domain/deliveries.service';
 import { DeliveriesController } from './deliveries.controller';
 
-function buildDelivery(overrides: Partial<DeliveryEntity> = {}): DeliveryEntity {
+function buildDelivery(
+  overrides: Partial<DeliveryEntity> = {},
+): DeliveryEntity {
   return {
     id: 'dlv-1',
     orderId: 'ord-1',
@@ -33,9 +35,20 @@ describe('DeliveriesController', () => {
 
   it('confirm delega en confirmByCode y mapea la respuesta', async () => {
     const { controller, service } = build();
-    service.confirmByCode.mockResolvedValue({ delivery: buildDelivery(), alreadyDelivered: false });
-    const res = await controller.confirm({ code: 'A7K9' } as never, 'seller-1', 'corr-1');
-    expect(service.confirmByCode).toHaveBeenCalledWith('A7K9', 'seller-1', 'corr-1');
+    service.confirmByCode.mockResolvedValue({
+      delivery: buildDelivery(),
+      alreadyDelivered: false,
+    });
+    const res = await controller.confirm(
+      { code: 'A7K9' } as never,
+      'seller-1',
+      'corr-1',
+    );
+    expect(service.confirmByCode).toHaveBeenCalledWith(
+      'A7K9',
+      'seller-1',
+      'corr-1',
+    );
     expect(res.orderId).toBe('ord-1');
     expect(res.alreadyDelivered).toBe(false);
   });
@@ -43,30 +56,58 @@ describe('DeliveriesController', () => {
   it('manualDelivery delega en registerManualDelivery', async () => {
     const { controller, service } = build();
     service.registerManualDelivery.mockResolvedValue({
-      delivery: buildDelivery({ method: DeliveryMethod.MANUAL, note: 'cámara falló' }),
+      delivery: buildDelivery({
+        method: DeliveryMethod.MANUAL,
+        note: 'cámara falló',
+      }),
       alreadyDelivered: true,
     });
     const dto = { reason: 'QR ilegible' } as never;
-    const res = await controller.manualDelivery('ord-1', dto, 'seller-1', 'corr-1');
-    expect(service.registerManualDelivery).toHaveBeenCalledWith('ord-1', 'seller-1', dto, 'corr-1');
+    const res = await controller.manualDelivery(
+      'ord-1',
+      dto,
+      'seller-1',
+      'corr-1',
+    );
+    expect(service.registerManualDelivery).toHaveBeenCalledWith(
+      'ord-1',
+      'seller-1',
+      dto,
+      'corr-1',
+    );
     expect(res.alreadyDelivered).toBe(true);
   });
 
   it('deliveryFailure delega en registerDeliveryFailure', async () => {
     const { controller, service } = build();
     service.registerDeliveryFailure.mockResolvedValue(
-      buildDelivery({ method: null, failureReason: DeliveryFailureReason.CUSTOMER_NO_SHOW }),
+      buildDelivery({
+        method: null,
+        failureReason: DeliveryFailureReason.CUSTOMER_NO_SHOW,
+      }),
     );
     const dto = { reason: DeliveryFailureReason.CUSTOMER_NO_SHOW } as never;
-    const res = await controller.deliveryFailure('ord-1', dto, 'seller-1', 'corr-1');
-    expect(service.registerDeliveryFailure).toHaveBeenCalledWith('ord-1', 'seller-1', dto, 'corr-1');
+    const res = await controller.deliveryFailure(
+      'ord-1',
+      dto,
+      'seller-1',
+      'corr-1',
+    );
+    expect(service.registerDeliveryFailure).toHaveBeenCalledWith(
+      'ord-1',
+      'seller-1',
+      dto,
+      'corr-1',
+    );
     expect(res.orderId).toBe('ord-1');
   });
 
   it('getStatus delega en getFulfillmentStatus con el usuario', () => {
     const { controller, service } = build();
     const user = { userId: 'u1', role: 'ADMIN' } as CurrentUserData;
-    service.getFulfillmentStatus.mockResolvedValue({ orderId: 'ord-1' } as never);
+    service.getFulfillmentStatus.mockResolvedValue({
+      orderId: 'ord-1',
+    } as never);
     void controller.getStatus('ord-1', user);
     expect(service.getFulfillmentStatus).toHaveBeenCalledWith('ord-1', user);
   });
@@ -74,13 +115,25 @@ describe('DeliveriesController', () => {
   it('listStoreDeliveries mapea data y conserva la paginación', async () => {
     const { controller, service } = build();
     service.listStoreDeliveries.mockResolvedValue({
-      data: [buildDelivery(), buildDelivery({ id: 'dlv-2' })],
+      data: [
+        { delivery: buildDelivery(), orderNumber: 'OC-20260713-6632' },
+        {
+          delivery: buildDelivery({ id: 'dlv-2' }),
+          orderNumber: 'OC-20260713-6633',
+        },
+      ],
       total: 2,
       page: 1,
       limit: 10,
     });
-    const res = await controller.listStoreDeliveries('str-1', { page: 1, limit: 10 } as never);
-    expect(service.listStoreDeliveries).toHaveBeenCalledWith('str-1', { page: 1, limit: 10 });
+    const res = await controller.listStoreDeliveries('str-1', {
+      page: 1,
+      limit: 10,
+    } as never);
+    expect(service.listStoreDeliveries).toHaveBeenCalledWith('str-1', {
+      page: 1,
+      limit: 10,
+    });
     expect(res.data).toHaveLength(2);
     expect(res.total).toBe(2);
     expect(res.page).toBe(1);

@@ -10,10 +10,19 @@ export class DeliveryResponseDto {
   @ApiProperty({ description: 'Id del pedido.', example: 'ord_123' })
   orderId!: string;
 
+  @ApiPropertyOptional({
+    description: 'Codigo visible del pedido.',
+    example: 'OC-20260713-6632',
+  })
+  orderNumber!: string | null;
+
   @ApiProperty({ description: 'Id de la tienda.', example: 'str_9' })
   storeId!: string;
 
-  @ApiProperty({ description: 'Usuario que registró la entrega.', example: 'usr_seller' })
+  @ApiProperty({
+    description: 'Usuario que registró la entrega.',
+    example: 'usr_seller',
+  })
   confirmedByUserId!: string;
 
   @ApiPropertyOptional({
@@ -38,7 +47,11 @@ export class DeliveryResponseDto {
   })
   deliveredAt!: Date;
 
-  @ApiPropertyOptional({ description: 'Nota asociada.', nullable: true, example: null })
+  @ApiPropertyOptional({
+    description: 'Nota asociada.',
+    nullable: true,
+    example: null,
+  })
   note!: string | null;
 
   @ApiProperty({
@@ -50,11 +63,16 @@ export class DeliveryResponseDto {
   })
   alreadyDelivered!: boolean;
 
-  static from(delivery: DeliveryEntity, alreadyDelivered = false): DeliveryResponseDto {
+  static from(
+    delivery: DeliveryEntity,
+    alreadyDelivered = false,
+    orderNumber: string | null = null,
+  ): DeliveryResponseDto {
     return Object.assign(new DeliveryResponseDto(), {
       id: delivery.id,
       orderId: delivery.orderId,
       storeId: delivery.storeId,
+      orderNumber,
       confirmedByUserId: delivery.confirmedByUserId,
       method: delivery.method,
       failureReason: delivery.failureReason,
