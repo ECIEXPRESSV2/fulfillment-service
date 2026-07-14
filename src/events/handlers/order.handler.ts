@@ -138,6 +138,7 @@ export class OrderHandler {
     await this.codesService.invalidateByOrder(manager, orderId);
     await this.codesService.generateForOrder(manager, {
       orderId,
+      orderNumber: orderNumber ?? orderId,
       buyerId,
       storeId,
       pickupExpiresAt,

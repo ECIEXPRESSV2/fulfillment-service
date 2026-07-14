@@ -37,6 +37,7 @@ export interface DeliveryFailureInput {
 
 interface ConfirmedEventInput {
   orderId: string;
+  orderNumber: string | null;
   buyerId: string;
   storeId: string;
   method: DeliveryMethod;
@@ -175,8 +176,12 @@ export class DeliveriesService {
         },
         manager,
       );
+      const qrProjection = await this.orderProjection.getByOrderId(
+        found.orderId,
+      );
       await this.enqueueConfirmed(manager, {
         orderId: found.orderId,
+        orderNumber: qrProjection?.orderNumber ?? null,
         buyerId: found.buyerId,
         storeId: found.storeId,
         method: DeliveryMethod.QR,
@@ -253,6 +258,7 @@ export class DeliveriesService {
       );
       await this.enqueueConfirmed(manager, {
         orderId,
+        orderNumber: projection.orderNumber ?? null,
         buyerId: projection.buyerId,
         storeId: projection.storeId,
         method: DeliveryMethod.MANUAL,
@@ -472,6 +478,7 @@ export class DeliveriesService {
       routingKey: 'fulfillment.delivery.confirmed',
       business: {
         orderId: event.orderId,
+        orderNumber: event.orderNumber,
         buyerId: event.buyerId,
         storeId: event.storeId,
         method: event.method,

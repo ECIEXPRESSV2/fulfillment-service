@@ -109,6 +109,7 @@ describe('CodesService', () => {
         orderId: 'ord-1',
         buyerId: 'buyer-1',
         storeId: 'str-1',
+        orderNumber: 'ord-1',
       });
 
       expect(result.created).toBe(true);
@@ -138,6 +139,7 @@ describe('CodesService', () => {
         orderId: 'ord-1',
         buyerId: 'buyer-1',
         storeId: 'str-1',
+        orderNumber: 'ord-1',
       });
 
       expect(qr.generatePng).toHaveBeenCalled();
@@ -164,6 +166,7 @@ describe('CodesService', () => {
         orderId: 'ord-1',
         buyerId: 'buyer-1',
         storeId: 'str-1',
+        orderNumber: 'ord-1',
       });
 
       expect(result.created).toBe(true);
@@ -185,6 +188,7 @@ describe('CodesService', () => {
         orderId: 'ord-1',
         buyerId: 'buyer-1',
         storeId: 'str-1',
+        orderNumber: 'ord-1',
       });
 
       expect(result.created).toBe(false);
@@ -201,6 +205,7 @@ describe('CodesService', () => {
         orderId: 'ord-1',
         buyerId: 'b',
         storeId: 's',
+        orderNumber: 'ord-1',
       });
 
       // repo.create(data, manager): primer argumento es data
@@ -221,6 +226,7 @@ describe('CodesService', () => {
         orderId: 'ord-1',
         buyerId: 'b',
         storeId: 's',
+        orderNumber: 'ord-1',
         pickupExpiresAt,
       });
 

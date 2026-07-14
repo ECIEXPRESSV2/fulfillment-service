@@ -101,6 +101,12 @@ async function bootstrap() {
       { path: 'fulfillment/qr/:file', method: RequestMethod.GET },
       // Imagen pública de entrega: /fulfillment/delivery/:orderId, fuera de /api/v1 (CLAUDE.md §7).
       { path: 'fulfillment/delivery/:orderId', method: RequestMethod.GET },
+      // Imágenes públicas para notificaciones: fuera de /api/v1 para que Meta las descargue.
+      { path: 'fulfillment/notification-image/confirmed/:orderId', method: RequestMethod.GET },
+      { path: 'fulfillment/notification-image/cancelled/:orderId', method: RequestMethod.GET },
+      { path: 'fulfillment/notification-image/qr-expired/:orderId', method: RequestMethod.GET },
+      { path: 'fulfillment/notification-image/payment-processed/:orderId/:amount', method: RequestMethod.GET },
+      { path: 'fulfillment/notification-image/refund-issued/:orderId/:amount', method: RequestMethod.GET },
     ],
   });
 

@@ -4,6 +4,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuditAction } from '../common/enums';
 import { CodesRepository } from '../codes/infra/codes.repository';
 import { OutboxService } from '../outbox/outbox.service';
+import { OrderProjectionService } from '../events/projections/order-projection.service';
 
 /** Cuántos códigos vencidos se procesan por corrida del job. */
 const BATCH_SIZE = 100;
@@ -22,6 +23,7 @@ export class ExpirationService {
     private readonly codesRepo: CodesRepository,
     private readonly outbox: OutboxService,
     private readonly audit: AuditService,
+    private readonly orderProjection: OrderProjectionService,
   ) {}
 
   /** Expira los códigos vencidos. Devuelve cuántos se expiraron efectivamente. */
@@ -36,12 +38,14 @@ export class ExpirationService {
         if (count === 0) {
           return false; // otro proceso ya lo cambió: no emitir evento
         }
+        const projection = await this.orderProjection.getByOrderId(code.orderId);
+        const orderNumber = projection?.orderNumber ?? undefined;
         await this.outbox.enqueue(manager, {
           aggregateId: code.orderId,
           aggregateType: 'PickupCode',
           eventType: 'qr.expired',
           routingKey: 'fulfillment.qr.expired',
-          business: { orderId: code.orderId, buyerId: code.buyerId },
+          business: { orderId: code.orderId, orderNumber, buyerId: code.buyerId },
         });
         await this.audit.record(
           {
