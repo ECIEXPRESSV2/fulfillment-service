@@ -6,7 +6,7 @@ import { OrderProjectionService } from '../projections/order-projection.service'
 import { OrderHandler, ORDER_ROUTING_KEYS } from './order.handler';
 
 function build() {
-  const tx = {} as EntityManager;
+  const tx = { query: jest.fn().mockResolvedValue(undefined) } as unknown as EntityManager;
   const dataSource = {
     transaction: jest.fn((cb: (manager: EntityManager) => Promise<unknown>) =>
       cb(tx),
@@ -53,6 +53,29 @@ function build() {
 }
 
 describe('OrderHandler', () => {
+  it('ready_for_pickup: dos entregas del mismo evento generan el código una sola vez', async () => {
+    const { handler, codesService, idempotency } = build();
+    // La primera entrega no ve el evento procesado; la segunda, tras esperar el lock
+    // de advisory (aquí simulado por el orden de resolución de promesas), sí lo ve
+    // procesado porque la primera ya terminó su transacción.
+    (idempotency.isProcessed as jest.Mock)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+
+    const event = {
+      orderId: 'ord-1',
+      buyerId: 'buyer-1',
+      storeId: 'str-1',
+      idempotencyKey: 'idem-x',
+    };
+    await Promise.all([
+      handler.handle(ORDER_ROUTING_KEYS.readyForPickup, event),
+      handler.handle(ORDER_ROUTING_KEYS.readyForPickup, event),
+    ]);
+
+    expect(codesService.generateForOrder).toHaveBeenCalledTimes(1);
+  });
+
   it('confirmed: proyecta el pedido sin generar el código aún', async () => {
     const { handler, orderProjection, codesService, idempotency } = build();
 

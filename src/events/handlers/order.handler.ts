@@ -34,15 +34,26 @@ export class OrderHandler {
 
   async handle(routingKey: string, event: EventRecord): Promise<void> {
     const idempotencyKey = this.str(event.idempotencyKey);
-    if (
-      idempotencyKey &&
-      (await this.idempotency.isProcessed(idempotencyKey))
-    ) {
-      return;
-    }
 
     try {
       await this.dataSource.transaction(async (manager) => {
+        // Lock de advisory de Postgres (liberado solo al terminar la tx) que serializa
+        // entregas concurrentes del MISMO evento. Sin esto, dos entregas casi simultáneas
+        // pasaban el chequeo de idempotencia ANTES de que cualquiera terminara (ninguna
+        // veía la otra como "ya procesada" todavía) y ambas corrían onReadyForPickup —
+        // que invalida el código ACTIVE previo y genera uno nuevo, así que la restricción
+        // única de "un solo código activo por pedido" nunca las hacía chocar: cada una
+        // limpiaba la cancha para sí misma y generaba su propio QR duplicado.
+        const lockKey =
+          idempotencyKey ?? `${routingKey}:${this.str(event.orderId) ?? ''}`;
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+          lockKey,
+        ]);
+
+        if (idempotencyKey && (await this.idempotency.isProcessed(idempotencyKey))) {
+          return; // la otra entrega ya terminó mientras esperábamos el lock
+        }
+
         switch (routingKey) {
           case ORDER_ROUTING_KEYS.confirmed:
             await this.onConfirmed(event, manager);
