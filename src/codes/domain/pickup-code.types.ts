@@ -27,6 +27,7 @@ export type ValidationResult =
 /** Entrada para generar el código de retiro de un pedido confirmado (UC-01). */
 export interface GenerateCodeInput {
   orderId: string;
+  orderNumber: string;
   buyerId: string;
   storeId: string;
   /** Vencimiento del pedido; si falta, se usa el fallback configurable. */

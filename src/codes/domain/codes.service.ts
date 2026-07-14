@@ -143,6 +143,7 @@ export class CodesService {
       routingKey: 'fulfillment.qr.generated',
       business: {
         orderId: input.orderId,
+        orderNumber: input.orderNumber,
         buyerId: input.buyerId,
         qrCode: qrImageUrl,
         imageUrl: qrImageUrl,
