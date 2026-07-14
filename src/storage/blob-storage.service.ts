@@ -36,6 +36,11 @@ export class BlobStorageService {
   private client?: BlobServiceClient;
   /** Cache de la user-delegation key para no pedirla en cada subida (se renueva al vencer). */
   private delegationKey?: { key: UserDelegationKey; expiresOn: Date };
+  // Sin este lock, dos generaciones de QR casi simultáneas ven la caché vacía a la vez y
+  // cada una dispara su propio getUserDelegationKey() contra Azure en paralelo — la misma
+  // carrera que causaba el invalid_grant de Gmail, aquí terminaba en el fallback a
+  // localhost. Con el lock, las llamadas concurrentes esperan la MISMA promesa.
+  private keyFetchInFlight: Promise<UserDelegationKey> | null = null;
 
   constructor(private readonly config: ConfigService<EnvironmentVariables, true>) {
     this.account = config.get('AZURE_STORAGE_ACCOUNT', { infer: true }) || undefined;
@@ -94,7 +99,11 @@ export class BlobStorageService {
     return `${blob.url}?${sas}`;
   }
 
-  /** Reutiliza la user-delegation key mientras cubra la ventana pedida; si no, la renueva. */
+  /**
+   * Reutiliza la user-delegation key mientras cubra la ventana pedida; si no, la renueva.
+   * Si ya hay un fetch en curso (disparado por otra subida concurrente), espera ESE mismo
+   * en vez de pedir una key nueva por su lado.
+   */
   private async getDelegationKey(
     startsOn: Date,
     expiresOn: Date,
@@ -103,10 +112,19 @@ export class BlobStorageService {
     if (cached && cached.expiresOn > expiresOn) {
       return cached.key;
     }
-    // Se pide con un margen extra para amortizar la cache entre subidas cercanas.
-    const keyExpiry = new Date(expiresOn.getTime() + 60 * 60 * 1000);
-    const key = await this.getClient().getUserDelegationKey(startsOn, keyExpiry);
-    this.delegationKey = { key, expiresOn: keyExpiry };
-    return key;
+    if (!this.keyFetchInFlight) {
+      // Se pide con un margen extra para amortizar la cache entre subidas cercanas.
+      const keyExpiry = new Date(expiresOn.getTime() + 60 * 60 * 1000);
+      this.keyFetchInFlight = this.getClient()
+        .getUserDelegationKey(startsOn, keyExpiry)
+        .then((key) => {
+          this.delegationKey = { key, expiresOn: keyExpiry };
+          return key;
+        })
+        .finally(() => {
+          this.keyFetchInFlight = null;
+        });
+    }
+    return this.keyFetchInFlight;
   }
 }
