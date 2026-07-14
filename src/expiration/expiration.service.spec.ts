@@ -37,9 +37,10 @@ function build() {
 
   const outbox = { enqueue: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<OutboxService>;
   const audit = { record: jest.fn().mockResolvedValue(undefined) } as unknown as jest.Mocked<AuditService>;
+  const orderProjection = { getByOrderId: jest.fn().mockResolvedValue({ orderNumber: 'OC-001' }) } as unknown as any;
 
-  const service = new ExpirationService(dataSource, codesRepo, outbox, audit);
-  return { service, codesRepo, outbox };
+  const service = new ExpirationService(dataSource, codesRepo, outbox, audit, orderProjection);
+  return { service, codesRepo, outbox, orderProjection };
 }
 
 describe('ExpirationService', () => {

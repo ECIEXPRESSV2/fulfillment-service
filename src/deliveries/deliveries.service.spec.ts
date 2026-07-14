@@ -183,7 +183,7 @@ describe('DeliveriesService', () => {
     it('crea entrega MANUAL, marca el código activo USED y publica el evento', async () => {
       const { service, codesService, codesRepo, deliveriesRepo, orderProjection, outbox } = build();
       orderProjection.getByOrderId.mockResolvedValue({
-        orderId: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'CONFIRMED', createdAt: new Date(), updatedAt: new Date(),
+        orderId: 'ord-1', orderNumber: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'CONFIRMED', createdAt: new Date(), updatedAt: new Date(),
       });
       codesRepo.findActiveByOrderId.mockResolvedValue(buildCode());
       deliveriesRepo.create.mockResolvedValue(buildDelivery({ method: DeliveryMethod.MANUAL }));
@@ -206,7 +206,7 @@ describe('DeliveriesService', () => {
     it('es idempotente: si ya hay entrega la devuelve sin duplicar', async () => {
       const { service, orderProjection, deliveriesRepo, outbox } = build();
       orderProjection.getByOrderId.mockResolvedValue({
-        orderId: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'CONFIRMED', createdAt: new Date(), updatedAt: new Date(),
+        orderId: 'ord-1', orderNumber: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'CONFIRMED', createdAt: new Date(), updatedAt: new Date(),
       });
       deliveriesRepo.findSuccessfulByOrderId.mockResolvedValue(buildDelivery({ id: 'dlv-prev' }));
 
@@ -229,7 +229,7 @@ describe('DeliveriesService', () => {
     it('409 ORDER_CANCELLED: no entrega un pedido cancelado (cierra la fuga de pago)', async () => {
       const { service, orderProjection, deliveriesRepo, outbox } = build();
       orderProjection.getByOrderId.mockResolvedValue({
-        orderId: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'cancelled', createdAt: new Date(), updatedAt: new Date(),
+        orderId: 'ord-1', orderNumber: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'cancelled', createdAt: new Date(), updatedAt: new Date(),
       });
 
       await expect(
@@ -242,7 +242,7 @@ describe('DeliveriesService', () => {
 
   describe('registerDeliveryFailure (UC-06)', () => {
     const projection = {
-      orderId: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'CONFIRMED', createdAt: new Date(), updatedAt: new Date(),
+      orderId: 'ord-1', orderNumber: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'CONFIRMED', createdAt: new Date(), updatedAt: new Date(),
     };
 
     it('registra el fallo y publica delivery.failed (sin marcar USED)', async () => {
@@ -309,7 +309,7 @@ describe('DeliveriesService', () => {
 
   describe('getFulfillmentStatus (UC-09)', () => {
     const projection = {
-      orderId: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'CONFIRMED', createdAt: new Date(), updatedAt: new Date(),
+      orderId: 'ord-1', orderNumber: 'ord-1', buyerId: 'buyer-1', storeId: 'str-1', pickupExpiresAt: null, status: 'CONFIRMED', createdAt: new Date(), updatedAt: new Date(),
     };
 
     it('404 cuando no hay proyección ni código', async () => {
