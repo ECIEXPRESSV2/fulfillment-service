@@ -87,4 +87,19 @@ describe('BlobStorageService', () => {
     // Segunda subida reutiliza la key cacheada (no vuelve a pedirla).
     expect(getUserDelegationKey).toHaveBeenCalledTimes(1);
   });
+
+  it('dos subidas concurrentes (sin key cacheada aún) piden la delegation key una sola vez', async () => {
+    const service = build('acct');
+    const input = {
+      container: 'qr-codes',
+      blobName: 'o1/tok.png',
+      content: Buffer.from('png'),
+      contentType: 'image/png',
+      ttlMinutes: 60,
+    };
+    // Antes del fix, ambas veían la caché vacía a la vez y cada una llamaba a
+    // getUserDelegationKey por su lado.
+    await Promise.all([service.uploadWithReadSas(input), service.uploadWithReadSas(input)]);
+    expect(getUserDelegationKey).toHaveBeenCalledTimes(1);
+  });
 });
