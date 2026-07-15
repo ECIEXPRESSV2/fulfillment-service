@@ -7,12 +7,14 @@ import { BlobStorageService } from './blob-storage.service';
 import { EnvironmentVariables } from '../config/env.config';
 
 const uploadData = jest.fn().mockResolvedValue(undefined);
+const createIfNotExists = jest.fn().mockResolvedValue(undefined);
 const getUserDelegationKey = jest.fn().mockResolvedValue({ signedObjectId: 'obj' });
 
 jest.mock('@azure/identity', () => ({ DefaultAzureCredential: jest.fn() }));
 jest.mock('@azure/storage-blob', () => ({
   BlobServiceClient: jest.fn().mockImplementation(() => ({
     getContainerClient: () => ({
+      createIfNotExists,
       getBlockBlobClient: () => ({
         uploadData,
         url: 'https://acct.blob.core.windows.net/qr-codes/o1/tok.png',
@@ -67,6 +69,7 @@ describe('BlobStorageService', () => {
       'https://acct.blob.core.windows.net',
       expect.anything(),
     );
+    expect(createIfNotExists).toHaveBeenCalled();
     expect(uploadData).toHaveBeenCalled();
     expect(getUserDelegationKey).toHaveBeenCalled();
     expect(generateBlobSASQueryParameters).toHaveBeenCalled();

@@ -68,7 +68,7 @@ function build(blobOverride: Record<string, unknown> = {}) {
     get: (key: string) => {
       if (key === 'PICKUP_CODE_FALLBACK_EXPIRY_HOURS') return FALLBACK_HOURS;
       if (key === 'QR_SAS_TTL_HOURS') return 24;
-      if (key === 'AZURE_STORAGE_QR_CONTAINER') return 'qr-codes';
+      if (key === 'AZURE_STORAGE_ORDERS_CONTAINER') return 'orders';
       return BASE_URL;
     },
   } as unknown as ConfigService;
