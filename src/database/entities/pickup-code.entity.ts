@@ -43,6 +43,10 @@ export class PickupCodeEntity {
   @Column({ name: 'used_at', type: 'timestamptz', nullable: true })
   usedAt: Date | null;
 
+  /** Cuándo se avisó por WhatsApp/SMS que el código está por vencer (5 min antes). */
+  @Column({ name: 'expiry_warning_sent_at', type: 'timestamptz', nullable: true })
+  expiryWarningSentAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
 
