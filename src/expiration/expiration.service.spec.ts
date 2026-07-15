@@ -63,7 +63,7 @@ describe('ExpirationService', () => {
       tx,
       expect.objectContaining({
         routingKey: 'fulfillment.qr.expired',
-        business: { orderId: 'o1', buyerId: 'b1' },
+        business: { orderId: 'o1', buyerId: 'b1', orderNumber: 'OC-001' },
       }),
     );
   });
