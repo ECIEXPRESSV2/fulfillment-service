@@ -57,5 +57,10 @@ export class ExpirationScheduler implements OnApplicationBootstrap, OnModuleDest
     } catch (error) {
       this.logger.error({ err: error }, 'Error ejecutando el job de expiración');
     }
+    try {
+      await this.expirationService.warnExpiringSoonCodes();
+    } catch (error) {
+      this.logger.error({ err: error }, 'Error ejecutando el job de aviso de vencimiento próximo');
+    }
   }
 }

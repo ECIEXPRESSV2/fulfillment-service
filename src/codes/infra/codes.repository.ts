@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
-import { EntityManager, LessThanOrEqual, Repository } from 'typeorm';
+import { Between, EntityManager, IsNull, LessThanOrEqual, Repository } from 'typeorm';
 import { PickupCodeEntity } from '../../database/entities/pickup-code.entity';
 import { PickupCodeStatus } from '../../common/enums';
 
@@ -98,6 +98,34 @@ export class CodesRepository {
     const result = await this.r(manager).update(
       { id, status: PickupCodeStatus.ACTIVE },
       { status: PickupCodeStatus.EXPIRED },
+    );
+    return result.affected ?? 0;
+  }
+
+  /**
+   * Códigos `ACTIVE` que vencen entre `now` y `threshold` y todavía no recibieron el aviso de
+   * "por vencer" (`expiryWarningSentAt IS NULL`), en lotes.
+   */
+  async findActiveExpiringSoon(now: Date, threshold: Date, take: number): Promise<PickupCodeEntity[]> {
+    return this.repo.find({
+      where: {
+        status: PickupCodeStatus.ACTIVE,
+        expiresAt: Between(now, threshold),
+        expiryWarningSentAt: IsNull(),
+      },
+      take,
+      order: { expiresAt: 'ASC' },
+    });
+  }
+
+  /**
+   * Marca que ya se avisó del vencimiento próximo **solo si sigue `ACTIVE` y sin aviso previo**
+   * (idempotente ante carreras). Devuelve cuántas filas cambiaron (0 o 1).
+   */
+  async markExpiryWarningSent(id: string, manager?: EntityManager): Promise<number> {
+    const result = await this.r(manager).update(
+      { id, status: PickupCodeStatus.ACTIVE, expiryWarningSentAt: IsNull() },
+      { expiryWarningSentAt: new Date() },
     );
     return result.affected ?? 0;
   }
