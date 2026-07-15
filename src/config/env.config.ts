@@ -64,15 +64,17 @@ export class EnvironmentVariables {
   PUBLIC_BASE_URL: string = 'http://localhost:3005';
 
   // ── Almacenamiento de imágenes (Azure Blob Storage) ──
-  // Cuenta de storage donde vive el contenedor privado de QRs. Si está vacía, el QR se
-  // sirve por el endpoint público de fallback (útil en local/dev sin credenciales de Azure).
+  // Cuenta de storage donde vive el contenedor privado compartido `orders` (QRs de fulfillment
+  // en `<orderId>/qr/...`, evidencia de reembolsos de orders-service en `<orderId>/refunds/...`).
+  // Si está vacía, el QR se sirve por el endpoint público de fallback (útil en local/dev sin
+  // credenciales de Azure).
   @IsString()
   @IsOptional()
   AZURE_STORAGE_ACCOUNT?: string;
 
   @IsString()
   @IsNotEmpty()
-  AZURE_STORAGE_QR_CONTAINER: string = 'qr-codes';
+  AZURE_STORAGE_ORDERS_CONTAINER: string = 'orders';
 
   // Vida del SAS del QR. El QR viaja a WhatsApp/email; el SAS debe seguir válido cuando el
   // usuario abra el correo. Se toma el mayor entre esto y lo que falte para que el código expire.

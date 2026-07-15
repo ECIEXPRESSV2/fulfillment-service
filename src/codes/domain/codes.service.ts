@@ -79,7 +79,7 @@ export class CodesService {
       infer: true,
     });
     this.publicBaseUrl = config.get('PUBLIC_BASE_URL', { infer: true });
-    this.qrContainer = config.get('AZURE_STORAGE_QR_CONTAINER', {
+    this.qrContainer = config.get('AZURE_STORAGE_ORDERS_CONTAINER', {
       infer: true,
     });
     this.qrSasTtlHours = config.get('QR_SAS_TTL_HOURS', { infer: true });
@@ -368,7 +368,7 @@ export class CodesService {
       );
       const url = await this.blob.uploadWithReadSas({
         container: this.qrContainer,
-        blobName: `${orderId}/${token}.png`,
+        blobName: `${orderId}/qr/${token}.png`,
         content: png,
         contentType: 'image/png',
         ttlMinutes,

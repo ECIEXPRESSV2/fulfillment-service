@@ -70,9 +70,11 @@ export class BlobStorageService {
       throw new Error('BlobStorageService deshabilitado: falta AZURE_STORAGE_ACCOUNT');
     }
     const service = this.getClient();
-    const blob = service
-      .getContainerClient(input.container)
-      .getBlockBlobClient(input.blobName);
+    const containerClient = service.getContainerClient(input.container);
+    // Sin `access`: el contenedor queda PRIVADO (nada de lectura anónima). Toda lectura pasa
+    // por la user-delegation SAS que se genera abajo. No-op si el contenedor ya existe.
+    await containerClient.createIfNotExists();
+    const blob = containerClient.getBlockBlobClient(input.blobName);
 
     await blob.uploadData(input.content, {
       blobHTTPHeaders: { blobContentType: input.contentType },
